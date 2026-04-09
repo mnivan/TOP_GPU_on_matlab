@@ -1,0 +1,24 @@
+CLAUDE.md
+.claude/
+
+# MATLAB compiled MEX files
+*.mexw64
+*.mexmaci64
+*.mexa64
+
+# MATLAB output files
+*.asv
+*.m~
+
+# Output directories generated at runtime
+out/
+
+# Large data files (distributed separately)
+data/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# LaTeX files
+*.tex
