@@ -4,21 +4,35 @@ A MATLAB/CUDA implementation of large-scale 3D structural topology optimization 
 
 ## Requirements
 
-- MATLAB (R2020a or later recommended)
-- CUDA Toolkit 11+
-- NVIDIA GPU with compute capability ≥ 6.0 (Pascal or newer)
+- MATLAB R2024b or later
+- CUDA Toolkit 12.8
+- NVIDIA GPU with compute capability ≥ 6.0 (Pascal or newer); tested on sm_89 (Ada Lovelace)
 - MATLAB Parallel Computing Toolbox (for `gpuArray`)
+
+## External Datasets
+
+Pre-built voxel models (Femur, Molar, GEbracket) are hosted separately:
+
+**Download:** https://syncandshare.lrz.de/getlink/fiW6M69m5HoTUcH4T7wLKZ/ (available until 2026-11-25)
+
+Place the downloaded `.TopVoxel` files in the `./data/` directory before use.
 
 ## Compilation
 
-Before the first run, compile all CUDA MEX kernels from within MATLAB:
+Before the first run, compile all CUDA MEX kernels from within MATLAB. A convenience script is provided:
 
 ```matlab
-mexcuda -output assembleKs_level2_inplace      assembleKs_level2_inplace_modified2.cu
+run('compile_all.m')
+```
+
+Or compile individually:
+
+```matlab
+mexcuda -output assembleKs_level2_inplace      assembleKs_level2_inplace.cu
 mexcuda -output assembleKs_higherLevel_inplace  assembleKs_higherLevel_inplace.cu
 mexcuda -output assembleKs_level2_superEle_inplace assembleKs_level2_superEle_inplace.cu
-mexcuda -output buildUMat_inplace               buildUMat_inplace.cu
-mexcuda -output accumarrayY_inplace             accumarrayY_inplace.cu
+mexcuda -output Gathering_inplace               Gathering_inplace.cu
+mexcuda -output Scattering_inplace              Scattering_inplace.cu
 mexcuda -output scatter_accum3_inplace          scatter_accum3_inplace.cu
 ```
 
@@ -52,6 +66,8 @@ TOP_GPU('./data/model.TopVoxel', 'V0', 0.12, 'ft', 2)
 | `mixed_Precision` | `0` | `0` = double precision, `1` = mixed (single inside V-cycle) |
 | `super_element` | `0` | `0` = standard voxel, `1` = 4×4×4 super-element mode |
 
+> **Note:** Super-element mode (`super_element=1`) currently supports box-shaped domains only. The input must be a full `true(nely, nelx, nelz)` array; arbitrary non-cuboid geometries loaded from `.TopVoxel` files are not yet supported in this mode.
+
 ### Examples
 
 ```matlab
@@ -61,8 +77,8 @@ TOP_GPU(true(30, 60, 10), 'optCase', 1, 'V0', 0.3)
 % Larger domain with PDE filter and mixed precision
 TOP_GPU(true(60, 120, 20), 'optCase', 1, 'V0', 0.2, 'ft', 2, 'mixed_Precision', 1)
 
-% File-based model with super-element mode
-TOP_GPU('./data/femur.TopVoxel', 'V0', 0.12, 'super_element', 1)
+% File-based model (standard voxel mode)
+TOP_GPU('./data/femur.TopVoxel', 'V0', 0.12, 'ft', 2)
 ```
 
 ## Output
@@ -76,3 +92,11 @@ Results are saved to `./out/<run_name>/`:
 | `*.stl` | Isosurface mesh of the optimized structure (STL) |
 
 The run name is auto-generated from the input parameters (e.g., `case1_60x30x10_V0.2_r1.732_ft1_n50_mp0_se0`).
+
+## Acknowledgements
+
+This code was developed with reference to the implementation accompanying the paper:
+
+> Aage, N., Lazarov, B. S., et al. *Scalable 3D Topology Optimization with Matrix-free MATLAB Code.*
+
+GitHub repository: https://github.com/PSLer/TOP3D_XL
