@@ -66,19 +66,19 @@ TOP_GPU('./data/model.TopVoxel', 'V0', 0.12, 'ft', 2)
 | `mixed_Precision` | `0` | `0` = double precision, `1` = mixed (single inside V-cycle) |
 | `super_element` | `0` | `0` = standard voxel, `1` = 4×4×4 super-element mode |
 
-> **Note:** Super-element mode (`super_element=1`) currently supports box-shaped domains only. The input must be a full `true(nely, nelx, nelz)` array; arbitrary non-cuboid geometries loaded from `.TopVoxel` files are not yet supported in this mode.
+> **Note:** Super-element mode (`super_element=1`) currently supports box-shaped domains only. The input must be a full `true(nely, nelx, nelz)` array; arbitrary non-cuboid geometries loaded from `.TopVoxel` files are not yet supported in this mode. In addition, `ft=2` (PDE density filter) is required when using super-element mode.
 
 ### Examples
 
 ```matlab
-% Small cantilever beam, 30x60x10 voxels
-TOP_GPU(true(30, 60, 10), 'optCase', 1, 'V0', 0.3)
+% Cantilever beam, 24x48x24 voxels
+TOP_GPU(true(24, 48, 24), 'optCase', 1, 'V0', 0.12)
 
-% Larger domain with PDE filter and mixed precision
-TOP_GPU(true(60, 120, 20), 'optCase', 1, 'V0', 0.2, 'ft', 2, 'mixed_Precision', 1)
+% MBB beam with super-element mode (ft=2 required)
+TOP_GPU(true(10, 60, 10), 'optCase', 2, 'V0', 0.2, 'ft', 2, 'super_element', 1)
 
 % File-based model (standard voxel mode)
-TOP_GPU('./data/femur.TopVoxel', 'V0', 0.12, 'ft', 2)
+TOP_GPU('./data/femur.TopVoxel', 'V0', 0.4, 'ft', 2)
 ```
 
 ## Output
@@ -97,6 +97,6 @@ The run name is auto-generated from the input parameters (e.g., `case1_60x30x10_
 
 This code was developed with reference to the implementation accompanying the paper:
 
-> Aage, N., Lazarov, B. S., et al. *Scalable 3D Topology Optimization with Matrix-free MATLAB Code.*
+> Wang, J., Aage, N., Wu, J., Sigmund, O., & Westermann, R. *Efficient large-scale 3D topology optimization with matrix-free MATLAB code.* Structural and Multidisciplinary Optimization, 2025.
 
 GitHub repository: https://github.com/PSLer/TOP3D_XL
