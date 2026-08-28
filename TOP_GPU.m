@@ -2732,3 +2732,75 @@ function eNodMat = build_eNodMat_match(nx, ny, nz)
 
     eNodMat = int32(repmat(eNodVec, 1, 8) + off);
 end
+
+%% CUDA stiffness-assembly interface wrappers
+
+function d_Ks = assembleKs_level2_gpu(interpolatingKe, eDofMat, ...
+    elementUpwardMap, eleModulus, iKeCol, d_mapUniqueKes, ...
+    d_uniqueKesFree, d_uniqueKesFixed)
+% Assemble level-2 coarse-element stiffness on the GPU with CUDA MEX.
+% This evaluates the Galerkin sum directly without forming a projected
+% stiffness matrix for every fine element in MATLAB.
+
+numElements = size(elementUpwardMap, 1);
+nCh = size(elementUpwardMap, 2);
+Pch = zeros(24, 24, nCh);
+interpolatingKe = full(interpolatingKe);
+for s = 1:nCh
+    Pch(:, :, s) = interpolatingKe(eDofMat(s, :), :);
+end
+
+d_Ks = gpuArray.zeros(24, 24, numElements, 'double');
+d_eleModulus = gpuArray(double(eleModulus(:)));
+d_K_0 = gpuArray(double(iKeCol(:)));
+d_Pch = gpuArray(double(Pch));
+d_upMap = gpuArray(int32(elementUpwardMap));
+
+assembleKs_level2_inplace(d_Ks, d_upMap, d_eleModulus, d_K_0, ...
+    d_Pch, d_mapUniqueKes, d_uniqueKesFree, d_uniqueKesFixed);
+end
+
+function d_Ks = assembleKs_higherLevel_gpu(interpolatingKe, eDofMat, ...
+    elementUpwardMap, d_KsPrev)
+% Assemble coarse-element stiffness at multigrid levels 3 and above.
+% Computes Ks[e] = sum_s B_s' * KsPrev[upMap[e,s]] * B_s.
+
+numElements = size(elementUpwardMap, 1);
+nSub = size(elementUpwardMap, 2);
+
+Psub = zeros(24, 24, nSub);
+for s = 1:nSub
+    Psub(:, :, s) = full(interpolatingKe(eDofMat(s, :), :));
+end
+
+d_Ks = gpuArray.zeros(24, 24, numElements, 'double');
+d_upMap = gpuArray(int32(elementUpwardMap));
+d_Psub = gpuArray(double(Psub));
+
+assembleKs_higherLevel_inplace(d_Ks, d_upMap, d_KsPrev, d_Psub);
+end
+
+function d_Ks = assembleKs_level2_superEle_gpu( ...
+    interpolatingKe, eDofMat, elementUpwardMap, ...
+    d_Ks0, d_eleModulus, d_mapUniqueKes, ...
+    d_uniqueKesFree, d_uniqueKesFixed)
+% Assemble level-2 coarse-element stiffness in super-element mode.
+
+numElements = size(elementUpwardMap, 1);
+nSub = size(elementUpwardMap, 2);
+
+interpolatingKe = full(interpolatingKe);
+Psub = zeros(24, 24, nSub);
+for s = 1:nSub
+    Psub(:, :, s) = interpolatingKe(eDofMat(s, :), :);
+end
+
+d_Ks = gpuArray.zeros(24, 24, numElements, 'double');
+d_Psub = gpuArray(double(Psub));
+d_upMap = gpuArray(int32(elementUpwardMap));
+
+assembleKs_level2_superEle_inplace( ...
+    d_Ks, d_upMap, d_Ks0, d_Psub, ...
+    d_mapUniqueKes, d_eleModulus, ...
+    d_uniqueKesFree, d_uniqueKesFixed);
+end
