@@ -1,28 +1,60 @@
 function TOP_GPU(inputModel, varargin)
-% TOP_GPU  GPU-accelerated topology optimization (batch-friendly).
+% TOP_GPU  Dispatch GPU topology optimization (TO) or porous infill (PIO).
 %
-% Usage (rectangular domain):
-%   TOP_GPU(true(nely,nelx,nelz), 'optCase',1, 'V0',0.12, ...)
+% Global-volume topology optimization:
+%   TOP_GPU(true(nely,nelx,nelz), 'consType','GLOBAL', 'V0',0.12, ...
+%       'ft',2, 'filter_method','pde')
 %
-% Usage (file-based model):
-%   TOP_GPU('./data/femur.TopVoxel', 'V0',0.12, ...)
+% Local-volume porous infill optimization:
+%   TOP_GPU(true(nely,nelx,nelz), 'consType','LOCAL', 'V0',0.5, ...
+%       'rMin',sqrt(3), 'rHat',6)
 %
-% Name-value optional parameters (with defaults):
-%   'optCase'          1        Load/BC case (rectangular domain only)
-%   'V0'              0.12     Target volume fraction
-%   'rMin'            sqrt(3)  Filter radius (cells)
-%   'nLoop'           50       Max optimization iterations
-%   'ft'              1        Filter type: 1=sensitivity, 2=PDE density
-%   'mixed_Precision' 0        0=double, 1=mixed precision
-%   'super_element'   0        0=standard voxel, 1=super-element mode
+% PIO does not accept ft, filter_method, mixed_Precision, or super_element.
+% Super-element TO is restricted to ft=2 with the distance filter.
+
+[consType, solverArgs] = extractConstraintType(varargin);
+switch consType
+	case 'GLOBAL'
+		TOP_GPU_TO(inputModel, solverArgs{:});
+	case 'LOCAL'
+		TOP_GPU_PIO(inputModel, solverArgs{:});
+	otherwise
+		error('TOP_GPU:InvalidConstraintType', ...
+			'consType must be either ''GLOBAL'' or ''LOCAL''.');
+end
+end
+
+function [consType, solverArgs] = extractConstraintType(args)
+consType = 'GLOBAL';
+solverArgs = args;
+if mod(numel(args),2), error('TOP_GPU:NameValuePairs','Optional inputs must be name-value pairs.'); end
+names = args(1:2:end);
+isConsType = cellfun(@(v) (ischar(v) || (isstring(v) && isscalar(v))) && ...
+	strcmpi(char(v), 'consType'), names);
+if nnz(isConsType)>1, error('TOP_GPU:DuplicateConstraintType','consType may only be specified once.'); end
+if any(isConsType)
+	pairIndex = find(isConsType, 1);
+	value = args{2*pairIndex};
+	if ~(ischar(value) || (isstring(value) && isscalar(value)))
+		error('TOP_GPU:InvalidConstraintType', 'consType must be GLOBAL or LOCAL.');
+	end
+	consType = upper(char(value));
+	solverArgs(2*pairIndex-1:2*pairIndex) = [];
+end
+end
+
+function TOP_GPU_TO(inputModel, varargin)
+% TOP_GPU_TO  Global-volume topology optimization implementation.
 
 p = inputParser;
+p.FunctionName = 'TOP_GPU GLOBAL';
 addRequired(p, 'inputModel');
 addParameter(p, 'optCase',          1);
 addParameter(p, 'V0',               0.12);
 addParameter(p, 'rMin',             sqrt(3));
 addParameter(p, 'nLoop',            50);
-addParameter(p, 'ft',               1);
+addParameter(p, 'ft',               1, @(v) isnumeric(v) && isscalar(v) && ismember(v, [1 2]));
+addParameter(p, 'filter_method',    'pde', @(v) ischar(v) || (isstring(v) && isscalar(v)));
 addParameter(p, 'mixed_Precision',  0);
 addParameter(p, 'super_element',    0);
 parse(p, inputModel, varargin{:});
@@ -31,9 +63,19 @@ V0              = p.Results.V0;
 rMin            = p.Results.rMin;
 nLoop           = p.Results.nLoop;
 ft              = p.Results.ft;
+filter_method   = lower(char(p.Results.filter_method));
 mixed_Precision = p.Results.mixed_Precision;
 super_element   = p.Results.super_element;
 optCase_in      = p.Results.optCase;
+
+if ~ismember(filter_method, {'pde', 'distance'})
+	error('TOP_GPU:InvalidFilterMethod', ...
+		'filter_method must be either ''pde'' or ''distance''.');
+end
+if super_element ~= 0 && (ft ~= 2 || ~strcmp(filter_method, 'distance'))
+	error('TOP_GPU:SuperElementFilter', ...
+		'Super-element TO requires ft=2 and filter_method=''distance''.');
+end
 
 reset(gpuDevice);
 global mixed_Precision_; mixed_Precision_ = mixed_Precision;
@@ -56,32 +98,24 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 	%% Build output folder name from parameters
 	if islogical(inputModel)
 		[nely_sz, nelx_sz, nelz_sz] = size(inputModel);
-		folderName = sprintf('case%d_%dx%dx%d_V%.4g_r%.4g_ft%d_n%d_mp%d_se%d', ...
-			optCase_in, nelx_sz, nely_sz, nelz_sz, V0, rMin, ft, nLoop, mixed_Precision, super_element);
-		InitialSettings(nelx_sz);
-        %InitialSettings(1);
+		folderName = sprintf('case%d_%dx%dx%d_TO_V%.4g_r%.4g_ft%d_fm%s_n%d_mp%d_se%d', ...
+			optCase_in, nelx_sz, nely_sz, nelz_sz, V0, rMin, ft, filter_method, nLoop, mixed_Precision, super_element);
+		InitialSettings();
 	else
 		[~, modelName, ~] = fileparts(inputModel);
-		folderName = sprintf('%s_V%.4g_r%.4g_ft%d_n%d_mp%d_se%d', ...
-			modelName, V0, rMin, ft, nLoop, mixed_Precision, super_element);
-		InitialSettings(1);
+		folderName = sprintf('%s_TO_V%.4g_r%.4g_ft%d_fm%s_n%d_mp%d_se%d', ...
+			modelName, V0, rMin, ft, filter_method, nLoop, mixed_Precision, super_element);
+		InitialSettings();
 	end
-	outPath = ['./out/' folderName '/'];
-	if exist(outPath, 'dir')
-		tIdx = 1;
-		while exist(['./out/' folderName '_t' num2str(tIdx) '/'], 'dir')
-			tIdx = tIdx + 1;
-		end
-		folderName = [folderName '_t' num2str(tIdx)];
-		outPath = ['./out/' folderName '/'];
-	end
-	mkdir(outPath);
+	outPath = createUniqueOutputPath(folderName);
 	fid = fopen(strcat(outPath, 'RunLog.log'), 'w'); fclose(fid); diary(strcat(outPath, 'RunLog.log'));
 	
 	%%Displaying Inputs
 	disp('==========================Displaying Inputs==========================');
 	disp(['..............................................Volume Fraction: ', sprintf('%6.4f', V0)]);
 	disp(['..........................................Filter Radius: ', sprintf('%6.4f', rMin), ' Cells']);
+	disp(['............................................Filter Type: ', sprintf('%1i', ft)]);
+	disp(['..........................................Filter Method: ', filter_method]);
 	disp(['................................................Cell Size: ', sprintf('%6.4e', cellSize_)]);
 	disp(['...............................................#MGCG Iterations: ', sprintf('%4i', maxIT_)]);
 	disp(strcat('.....................................................V-cycle: ', " ", typeVcycle_));
@@ -102,13 +136,26 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 	FEA_ApplyBoundaryCondition();
 	FEA_SetupVoxelBased();
 	
-	%%2. Setup PDE filter or Standard filter
+	%%2. Setup PDE or distance-based filter
 	if Super_element_==0
-	[PDEkernal4Filtering, diagPrecond4Filtering] = TopOpti_SetupPDEfilter_matrixFree(rMin,inputModel);
-	d_PDEkernal4Filtering=gpuArray(PDEkernal4Filtering);
-	d_diagPrecond4Filtering=gpuArray(diagPrecond4Filtering);
-	clear PDEkernal4Filtering;
-	clear diagPrecond4Filtering;
+		if strcmp(filter_method, 'pde')
+			[PDEkernal4Filtering, diagPrecond4Filtering] = TopOpti_SetupPDEfilter_matrixFree(rMin,inputModel);
+			d_PDEkernal4Filtering = gpuArray(PDEkernal4Filtering);
+			d_diagPrecond4Filtering = gpuArray(diagPrecond4Filtering);
+			clear PDEkernal4Filtering diagPrecond4Filtering;
+		else
+			filterGridSize = [meshHierarchy_(1).resY, meshHierarchy_(1).resX, meshHierarchy_(1).resZ];
+			filterEleMapBack = meshHierarchy_(1).eleMapBack;
+			bcF = 0;
+			[dy,dx,dz] = meshgrid(-ceil(rMin)+1:ceil(rMin)-1, ...
+				-ceil(rMin)+1:ceil(rMin)-1, -ceil(rMin)+1:ceil(rMin)-1);
+			h = max(0, rMin - sqrt(dx.^2 + dy.^2 + dz.^2));
+			filterMask = gpuArray.zeros(filterGridSize(1), filterGridSize(2), filterGridSize(3));
+			filterMask(filterEleMapBack) = 1;
+			Hs = imfilter(filterMask, gpuArray(h), bcF);
+			h = gpuArray(h);
+			clear filterMask;
+		end
     else
 		rMin=Num_*rMin;
 		[map_old2new, map_new2old] = gen_index_mapping(nelx, nely, nelz, Num_);
@@ -134,9 +181,7 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 	sharpness = 1.0;
 	lssIts = [];
 	cHist = [];
-	volHist = [];
 	sharpHist = [];
-	consHist = [];
 	tHist = [];
 	%%4. Evaluate Compliance of Fully Solid Domain
 	U = zeros(size(F_),'gpuArray');
@@ -154,7 +199,6 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
     tSolvingFEAiterationClock = tic;
 	for ii=1:size(F_,2), [U(:,ii), ~] = Solving_PCG(@Solving_KbyU_MatrixFree, @Solving_Vcycle, d_F_(:,ii), tol_, maxIT_, [0 1]);end	
 	itSolvingFEAiteration = toc(tSolvingFEAiterationClock);
-    %fprintf('%4i',itSolvingFEAiteration);
 	if Super_element_==0
 	ceList = TopOpti_ComputeUnitCompliance(U);
 	cSolid = meshHierarchy_(1).eleModulus*ceList;
@@ -187,10 +231,7 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 		itSolvingFEAiteration = toc(tSolvingFEAiterationClock);
 		tOptimizationClock = tic;
 		if Super_element_==0
-            %e1=tic;
 		ceList = TopOpti_ComputeUnitCompliance(U);
-        %e1=toc(e1);
-        %fprintf("sensitivity computation time: %.3f\n",e1);
 		ceNorm = ceList / cSolid;
 		cObj = meshHierarchy_(1).eleModulus * ceNorm;
 		cDesign = cObj*cSolid;
@@ -211,11 +252,30 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 		%%5.3 filtering/modification of sensitivity
 		tPDEfilteringClock = tic;
         if 1==ft
-			dc(:) = TopOpti_ConductPDEFiltering_matrixFree(x(:).*dc(:), d_PDEkernal4Filtering, d_diagPrecond4Filtering)./max(1e-3,x(:));     
+			if strcmp(filter_method, 'pde')
+				dc(:) = TopOpti_ConductPDEFiltering_matrixFree(x(:).*dc(:), ...
+					d_PDEkernal4Filtering, d_diagPrecond4Filtering)./max(1e-3,x(:));
+			else
+				filterBuffer = gpuArray.zeros(filterGridSize(1), filterGridSize(2), filterGridSize(3));
+				filterBuffer(filterEleMapBack) = x(:).*dc(:);
+				filterBuffer = imfilter(filterBuffer, h, bcF);
+				dc(:) = filterBuffer(filterEleMapBack) ./ Hs(filterEleMapBack) ./ max(1e-3,x(:));
+			end
         elseif ft == 2
 			if Super_element_==0
-			dc(:) = TopOpti_ConductPDEFiltering_matrixFree(dc(:), d_PDEkernal4Filtering, d_diagPrecond4Filtering);
-			dv(:) = TopOpti_ConductPDEFiltering_matrixFree(dv(:), d_PDEkernal4Filtering, d_diagPrecond4Filtering);
+				if strcmp(filter_method, 'pde')
+					dc(:) = TopOpti_ConductPDEFiltering_matrixFree(dc(:), d_PDEkernal4Filtering, d_diagPrecond4Filtering);
+					dv(:) = TopOpti_ConductPDEFiltering_matrixFree(dv(:), d_PDEkernal4Filtering, d_diagPrecond4Filtering);
+				else
+					filterBuffer = gpuArray.zeros(filterGridSize(1), filterGridSize(2), filterGridSize(3));
+					filterBuffer(filterEleMapBack) = dc(:) ./ Hs(filterEleMapBack);
+					filterBuffer = imfilter(filterBuffer, h, bcF);
+					dc(:) = filterBuffer(filterEleMapBack);
+					filterBuffer(:) = 0;
+					filterBuffer(filterEleMapBack) = dv(:) ./ Hs(filterEleMapBack);
+					filterBuffer = imfilter(filterBuffer, h, bcF);
+					dv(:) = filterBuffer(filterEleMapBack);
+				end
 			else
 			dc=dc(:);
 			 dc = imfilter(reshape(dc(map_old2new), 4*nely, 4*nelx, 4*nelz ) ./ Hs, h, bcF );
@@ -237,7 +297,7 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 			lmid = 0.5*(l2+l1);
 			xnew = max(0,max(x-move,min(1,min(x+move,x.*sqrt(-dc./dv/lmid)))));
 			xnew(passiveElements,1) = 1.0;
-			gt=fval+mean(((xnew(:)-x(:))));
+			gt = fval + mean(dv(:).*(xnew(:)-x(:)));
 			if gt>0, l1 = lmid; else l2 = lmid; end				
 		end
 	else
@@ -245,7 +305,7 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 			lmid = 0.5*(l2+l1);
 			xnew = max(0,max(x-move,min(1,min(x+move,x.*sqrt(-dc./dv/lmid)))));
 			xnew(Num_,passiveElements) = 1.0;
-			gt=fval+mean(((xnew(:)-x(:))));
+			gt = fval + mean(dv(:).*(xnew(:)-x(:)));
 			if gt>0, l1 = lmid; else l2 = lmid; end				
     		end	
      end
@@ -257,7 +317,14 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 			xPhys = xnew;
 		elseif ft == 2
 			if Super_element_==0
-			xPhys(:) = TopOpti_ConductPDEFiltering_matrixFree(xnew(:), d_PDEkernal4Filtering, d_diagPrecond4Filtering);
+				if strcmp(filter_method, 'pde')
+					xPhys(:) = TopOpti_ConductPDEFiltering_matrixFree(xnew(:), d_PDEkernal4Filtering, d_diagPrecond4Filtering);
+				else
+					filterBuffer = gpuArray.zeros(filterGridSize(1), filterGridSize(2), filterGridSize(3));
+					filterBuffer(filterEleMapBack) = xnew(:);
+					filterBuffer = imfilter(filterBuffer, h, bcF);
+					xPhys(:) = filterBuffer(filterEleMapBack) ./ Hs(filterEleMapBack);
+				end
 			else
 			xnew=xnew(:);
 			xPhys=imfilter(reshape(xnew(map_old2new), 4*nely, 4*nelx, 4*nelz ), h, bcF ) ./ Hs;
@@ -277,8 +344,6 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 
 		%%5.5 write opti. history
 		cHist(loop,1) = cDesign;
-		volHist(loop,1) = V;
-		consHist(loop,:) = fval;
 		sharpHist(loop,1) = sharpness;
 		iTimeStatistics = [itSolvingFEAssembling itSolvingFEAiteration itimeOptimization itimeDensityFiltering itimeTotal];
 		tHist(loop,:) = iTimeStatistics;
@@ -295,10 +360,10 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 	densityLayout_ = gather(xPhys(:));
 	else
 	densityLayout_ = gather(xPhys);
-	% Export xPhys in small-element (spatial grid) order as N×1
+	% Export xPhys in small-element (spatial grid) order as N-by-1.
 	map_old2new_cpu = gather(map_old2new);
 	xPhys_sorted = gather(xPhys(:));
-	xPhys_sorted = xPhys_sorted(map_old2new_cpu);   % reorder to spatial grid order, N×1
+	xPhys_sorted = xPhys_sorted(map_old2new_cpu);   % Reorder to spatial grid order, N-by-1.
 	fid = fopen(strcat(outPath, 'xPhys_sorted.dat'), 'w');
 	fprintf(fid, '%30.16e\n', xPhys_sorted);
 	fclose(fid);
@@ -309,40 +374,11 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 	disp(['..........Optimization (inc. sentivity analysis, update) Costs: ', sprintf('%10.4e', sum(tHist(:,3))), 's.']);
 	disp(['..........Performing PDE Filtering Costs: ', sprintf('%10.4e', sum(tHist(:,4))), 's.']);
 	disp(['..........Performing Topology Optimization Costs (in total): ', sprintf('%10.4e', toc(tStartTotal)), 's.']);
-	fid = fopen(strcat(outPath, 'iters_Target.dat'), 'w');
-	fprintf(fid, '%d\n', lssIts);
-	fclose(fid);
-	fid = fopen(strcat(outPath, 'c_Target.dat'), 'w');
-	fprintf(fid, '%30.16e\n', cHist);
-	fclose(fid);
-	fid = fopen(strcat(outPath, 'sharp_Target.dat'), 'w');
-	fprintf(fid, '%30.16e\n', sharpHist);
-	fclose(fid);
-	fid = fopen(strcat(outPath, 'timing_Target.dat'), 'w');
-	fprintf(fid, '%16.6e\n', tHist(:,end));
-	fclose(fid);
-	fid=fopen(strcat(outPath, 'solvetiming_Target.dat'), 'w');
-	fprintf(fid, '%16.6e\n', tHist(:,2));
-	fclose(fid);
+	writeOptimizationHistory(outPath, lssIts, cHist, sharpHist, tHist);
 
 	%%Vis.
 	if Super_element_==0
-    allVoxels = zeros(size(meshHierarchy_(1).eleMapForward));
-	allVoxels(meshHierarchy_(1).eleMapBack,1) = densityLayout_;
-	isovals = reshape(allVoxels,meshHierarchy_(1).resY,meshHierarchy_(1).resX,meshHierarchy_(1).resZ);
-    isovals = flip(isovals,1);
-    isovals = smooth3(isovals,'box',1);    
-	% figure;
-	facesIsosurface = isosurface(isovals,0.5);
-	facesIsocap = isocaps(isovals,0.5);
-    patch(facesIsosurface,'FaceColor',[0 127 0]/255,'EdgeColor','none');
-    patch(facesIsocap,'FaceColor',[0 127 0]/255,'EdgeColor','none');
-    view(55,25); axis equal tight on; axis off; xlabel('X'); ylabel('Y'); zlabel('Z');
-    lighting('gouraud');
-    material('dull');
-    camlight('headlight','infinite');
-	fileName = strcat(outPath, 'DesignVolume.stl');
-	IO_ExportDesignInTriSurface_stl(fileName, facesIsosurface, facesIsocap);
+		exportStandardDesign(outPath, true);
 	else
 	rx = meshHierarchy_(1).resX; 
     ry = meshHierarchy_(1).resY;   
@@ -369,7 +405,6 @@ isovals = smooth3(isovals, 'box', 3);
 beta=8;eta=0.5;
 den = tanh(beta*eta) + tanh(beta*(1-eta));
 isovals =(tanh(beta*eta) + tanh(beta*(isovals-eta))) / den;
-% figure;
 facesIsosurface = isosurface(isovals, 0.5);
 facesIsocap     = isocaps(isovals, 0.5);
 patch(facesIsosurface, 'FaceColor', [0 127 0]/255, 'EdgeColor', 'none');
@@ -381,15 +416,273 @@ fileName = strcat(outPath, 'DesignVolume.stl');
 IO_ExportDesignInTriSurface_stl(fileName, facesIsosurface, facesIsocap);
 end
 end
+
+function TOP_GPU_PIO(inputModel, varargin)
+% TOP_GPU_PIO  Local-volume porous infill optimization implementation.
+% The PIO path always uses standard voxels, double precision, and two PDE
+% filters: rMin for design regularization and rHat for the local constraint.
+
+p = inputParser;
+p.FunctionName = 'TOP_GPU LOCAL';
+addRequired(p, 'inputModel');
+addParameter(p, 'optCase', 1);
+addParameter(p, 'V0',      0.5);
+addParameter(p, 'rMin',    sqrt(3));
+addParameter(p, 'rHat',    6, @(v) isnumeric(v) && isreal(v) && isscalar(v) && isfinite(v) && v > 0);
+addParameter(p, 'nLoop',   300);
+parse(p, inputModel, varargin{:});
+
+Ve0 = p.Results.V0; rMin = p.Results.rMin; rHat = p.Results.rHat;
+nLoop = p.Results.nLoop; optCase_in = p.Results.optCase;
+
+reset(gpuDevice);
+global mixed_Precision_; mixed_Precision_ = 0;
+global Super_element_;   Super_element_ = 0;
+global optCase;          optCase = optCase_in;
+global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
+global meshHierarchy_ specifyPassiveRegions_ passiveElements_;
+global modulus_ modulusMin_ SIMPpenalty_ tol_ maxIT_;
+global densityLayout_ F_ d_F_;
+global cellSize_ typeVcycle_ nonDyadic_ poissonRatio_;
+
+if islogical(inputModel)
+	[nely_sz, nelx_sz, nelz_sz] = size(inputModel);
+	folderName = sprintf('case%d_%dx%dx%d_PIO_V%.4g_r%.4g_rh%.4g_n%d', ...
+		optCase_in, nelx_sz, nely_sz, nelz_sz, Ve0, rMin, rHat, nLoop);
+else
+	[~, modelName, ~] = fileparts(inputModel);
+	folderName = sprintf('%s_PIO_V%.4g_r%.4g_rh%.4g_n%d', ...
+		modelName, Ve0, rMin, rHat, nLoop);
+end
+InitialSettings();
+outPath = createUniqueOutputPath(folderName);
+fid = fopen(strcat(outPath, 'RunLog.log'), 'w'); fclose(fid); diary(strcat(outPath, 'RunLog.log'));
+
+disp('==========================Displaying Inputs==========================');
+disp(['........................................Local Volume Fraction: ', sprintf('%6.4f', Ve0)]);
+disp(['.......................................Effecting Radius: ', sprintf('%6.4f', rHat), ' Cells']);
+disp(['..........................................Filter Radius: ', sprintf('%6.4f', rMin), ' Cells']);
+disp('.................................................Optimization: PIO');
+disp('.................................................Filter Method: PDE');
+disp(['................................................Cell Size: ', sprintf('%6.4e', cellSize_)]);
+disp(['...............................................#MGCG Iterations: ', sprintf('%4i', maxIT_)]);
+disp(strcat('.....................................................V-cycle: ', " ", typeVcycle_));
+disp(['...............................................Non-dyadic Strategy: ', sprintf('%1i', nonDyadic_)]);
+disp(['...........................................Youngs Modulus: ', sprintf('%6.4e', modulus_)]);
+disp(['....................................Youngs Modulus (Min.): ', sprintf('%6.4e', modulusMin_)]);
+disp(['...........................................Poissons Ratio: ', sprintf('%6.4e', poissonRatio_)]);
+
+tStart = tic;
+CreateVoxelFEAmodel(inputModel);
+disp(['Preparing Voxel-based FEA Model Costs ', sprintf('%10.1f', toc(tStart)), 's']);
+FEA_ApplyBoundaryCondition();
+FEA_SetupVoxelBased();
+
+% PIO owns its filter configuration; callers do not select ft or method.
+[PDEkernal4Filtering, diagPrecond4Filtering] = ...
+	TopOpti_SetupPDEfilter_matrixFree(rMin, inputModel);
+[PDEkernal4LocalVolumeFraction, diagPrecond4LocalVolumeFraction] = ...
+	TopOpti_SetupPDEfilter_matrixFree(rHat, inputModel);
+d_PDEkernal4Filtering = gpuArray(PDEkernal4Filtering);
+d_diagPrecond4Filtering = gpuArray(diagPrecond4Filtering);
+d_PDEkernal4LocalVolumeFraction = gpuArray(PDEkernal4LocalVolumeFraction);
+d_diagPrecond4LocalVolumeFraction = gpuArray(diagPrecond4LocalVolumeFraction);
+clear PDEkernal4Filtering diagPrecond4Filtering;
+clear PDEkernal4LocalVolumeFraction diagPrecond4LocalVolumeFraction;
+
+TopOpti_SetPassiveElements(specifyPassiveRegions_(1), specifyPassiveRegions_(2), specifyPassiveRegions_(3));
+numElements = meshHierarchy_(1).numElements;
+passiveElements = passiveElements_;
+activeEles = setdiff((1:numElements)', double(passiveElements(:)));
+
+x = gpuArray(repmat(Ve0, numElements, 1));
+xPhys = x; xTilde = x; volMaxList = x;
+xold1 = x(activeEles); xold2 = xold1;
+onesArrPIO = gpuArray.ones(numElements, 1);
+
+betaPIO = 1; etaPIO = 0.5; pPIO = 16; pMaxPIO = 128;
+loopbeta = 0; loop = 0; change = 1; sharpness = 1;
+lssIts = []; cHist = []; sharpHist = []; tHist = [];
+
+U = zeros(size(F_), 'gpuArray');
+meshHierarchy_(1).eleModulus = repmat(modulus_, 1, numElements);
+meshHierarchy_(1).d_eleModulus = gpuArray(meshHierarchy_(1).eleModulus);
+tSolvingFEAssemblingClock = tic;
+Solving_AssembleFEAstencil();
+itSolvingFEAssembling = toc(tSolvingFEAssemblingClock);
+d_F_ = gpuArray(F_);
+tSolvingFEAiterationClock = tic;
+for ii = 1:size(F_, 2)
+	[U(:,ii), ~] = Solving_PCG(@Solving_KbyU_MatrixFree, @Solving_Vcycle, ...
+		d_F_(:,ii), tol_, maxIT_, [0 1]);
+end
+itSolvingFEAiteration = toc(tSolvingFEAiterationClock);
+ceList = TopOpti_ComputeUnitCompliance(U);
+cSolid = meshHierarchy_(1).eleModulus * ceList;
+disp(['Compliance of Fully Solid Domain: ' sprintf('%16.6e', cSolid)]);
+disp([' It.: ' sprintf('%4i',0) ' Assembling Time: ', ...
+	sprintf('%4i',itSolvingFEAssembling) 's;', ' Solver Time: ', ...
+	sprintf('%4i',itSolvingFEAiteration) 's.']);
+
+SIMP = @(rho) modulusMin_ + rho(:)'.^SIMPpenalty_ .* (modulus_-modulusMin_);
+DeSIMP = @(rho) SIMPpenalty_*(modulus_-modulusMin_)' .* rho.^(SIMPpenalty_-1);
+tStartTotal = tic;
+
+while loop < nLoop && change > 0.0001 && sharpness > 0.01
+	perIteCost = tic;
+	loop = loop + 1;
+
+	meshHierarchy_(1).d_eleModulus = SIMP(xPhys);
+	meshHierarchy_(1).eleModulus = gather(meshHierarchy_(1).d_eleModulus);
+	tSolvingFEAssemblingClock = tic;
+	Solving_AssembleFEAstencil();
+	itSolvingFEAssembling = toc(tSolvingFEAssemblingClock);
+	tSolvingFEAiterationClock = tic;
+	for ii = 1:size(F_, 2)
+		[U(:,ii), lssIts(end+1,1)] = Solving_PCG(@Solving_KbyU_MatrixFree, ...
+			@Solving_Vcycle, d_F_(:,ii), tol_, maxIT_, [0 1], U(:,ii));
+	end
+	itSolvingFEAiteration = toc(tSolvingFEAiterationClock);
+
+	tOptimizationClock = tic;
+	ceList = TopOpti_ComputeUnitCompliance(U);
+	ceNorm = ceList / cSolid;
+	cObj = meshHierarchy_(1).eleModulus * ceNorm;
+	cDesign = cObj * cSolid;
+	V = gather(sum(xPhys(:)) / numElements);
+	dc = -DeSIMP(xPhys).*ceNorm;
+	itimeOptimization = toc(tOptimizationClock);
+
+	tLocalVolumeConstraintClock = tic;
+	x_pde_hat = TopOpti_ConductPDEFiltering_matrixFree(xPhys, ...
+		d_PDEkernal4LocalVolumeFraction, d_diagPrecond4LocalVolumeFraction);
+	localPNorm = (sum(x_pde_hat.^pPIO ./ volMaxList.^pPIO)/numElements)^(1/pPIO);
+	dfdx_pde = localPNorm^(1-pPIO) * ...
+		(x_pde_hat.^(pPIO-1) ./ volMaxList.^pPIO) / numElements;
+	itimeLocalVolumeConstraint = toc(tLocalVolumeConstraintClock);
+
+	tPDEfilteringClock = tic;
+	dxPIO = betaPIO*(1-tanh(betaPIO*(xTilde-etaPIO)).^2) / ...
+		(tanh(betaPIO*etaPIO)+tanh(betaPIO*(1-etaPIO)));
+	dc = TopOpti_ConductPDEFiltering_matrixFree(dc.*dxPIO, ...
+		d_PDEkernal4Filtering, d_diagPrecond4Filtering);
+	dfdx = TopOpti_ConductPDEFiltering_matrixFree(dfdx_pde, ...
+		d_PDEkernal4LocalVolumeFraction, d_diagPrecond4LocalVolumeFraction);
+	dfdx = TopOpti_ConductPDEFiltering_matrixFree(dfdx.*dxPIO, ...
+		d_PDEkernal4Filtering, d_diagPrecond4Filtering);
+	itimeDensityFiltering = toc(tPDEfilteringClock);
+
+	tOptimizationClock = tic;
+	move = 0.1;
+	fval = localPNorm - 1;
+	xval_MMA = x(activeEles);
+	xmin_MMA = max(0.0, xval_MMA-move);
+	xmax_MMA = min(1.0, xval_MMA+move);
+	[xmma_MMA, xold1, xold2] = MMAseq(1, numel(activeEles), ...
+		xval_MMA, xmin_MMA, xmax_MMA, xold1, xold2, ...
+		dc(activeEles), fval, dfdx(activeEles));
+	change = gather(max(abs(xmma_MMA(:)-xval_MMA(:))));
+	x = onesArrPIO;
+	x(activeEles) = xmma_MMA;
+	itimeOptimization = itimeOptimization + toc(tOptimizationClock);
+
+	tPDEfilteringClock = tic;
+	xTilde = TopOpti_ConductPDEFiltering_matrixFree(x, ...
+		d_PDEkernal4Filtering, d_diagPrecond4Filtering);
+	xPhys = (tanh(betaPIO*etaPIO)+tanh(betaPIO*(xTilde-etaPIO))) / ...
+		(tanh(betaPIO*etaPIO)+tanh(betaPIO*(1-etaPIO)));
+	itimeDensityFiltering = itimeDensityFiltering + toc(tPDEfilteringClock);
+
+	xPhys(passiveElements,1) = 1;
+	sharpness = gather(4*sum(xPhys.*(1-xPhys))/numElements);
+	itimeTotal = toc(perIteCost);
+	cDesign = gather(cDesign);
+	fval = gather(fval);
+
+	cHist(loop,1) = cDesign;
+	sharpHist(loop,1) = sharpness;
+	tHist(loop,:) = [itSolvingFEAssembling itSolvingFEAiteration ...
+		itimeOptimization itimeDensityFiltering itimeLocalVolumeConstraint itimeTotal];
+
+	fprintf(' It.:%4i Obj.:%16.8e Vol.:%6.4e Sharp.:%6.4e Cons.:%4.2e Ch.:%4.2e\n', ...
+		loop, cDesign, V, sharpness, fval, change);
+	disp([' It.: ' sprintf('%i',loop) ' (Time)... Total per-It.: ' ...
+		sprintf('%8.2e',itimeTotal) 's; Assemb.: ', sprintf('%8.2e',itSolvingFEAssembling), ...
+		's; CG: ', sprintf('%8.2e',itSolvingFEAiteration), 's; Opti.: ', ...
+		sprintf('%8.2e',itimeOptimization), 's; Filtering: ', ...
+		sprintf('%8.2e',itimeDensityFiltering), 's; LVF: ', ...
+		sprintf('%8.2e',itimeLocalVolumeConstraint) 's.']);
+
+	if betaPIO < pMaxPIO && loopbeta + 1 >= 40
+		betaPIO = 2*betaPIO; loopbeta = 0; change = 1; sharpness = 1;
+		fprintf('Parameter beta increased to %g.\n', betaPIO);
+	else
+		loopbeta = loopbeta + 1;
+	end
+end
+
+densityLayout_ = gather(xPhys(:));
+IO_ExportDesignInVolume_nii(strcat(outPath, 'DesignVolume.nii'));
+disp(['..........Solving FEA Costs: ', sprintf('%10.4e', sum(sum(tHist(:,1:2)))), 's.']);
+disp(['..........Optimization (inc. sensitivity analysis, update) Costs: ', ...
+	sprintf('%10.4e', sum(tHist(:,3))), 's.']);
+disp(['..........Performing PDE Filtering Costs: ', sprintf('%10.4e', sum(tHist(:,4))), 's.']);
+disp(['..........Applying Local Volume Constraint Costs: ', sprintf('%10.4e', sum(tHist(:,5))), 's.']);
+disp(['..........Performing Porous Infill Optimization Costs (in total): ', ...
+	sprintf('%10.4e', toc(tStartTotal)), 's.']);
+writeOptimizationHistory(outPath, lssIts, cHist, sharpHist, tHist);
+
+exportStandardDesign(outPath, false);
+diary off;
+end
+
+function outPath = createUniqueOutputPath(folderName)
+outPath = ['./out/' folderName '/'];
+if exist(outPath, 'dir')
+	tIdx = 1;
+	while exist(['./out/' folderName '_t' num2str(tIdx) '/'], 'dir')
+		tIdx = tIdx + 1;
+	end
+	folderName = [folderName '_t' num2str(tIdx)];
+	outPath = ['./out/' folderName '/'];
+end
+mkdir(outPath);
+end
+
+function writeOptimizationHistory(outPath, lssIts, cHist, sharpHist, tHist)
+names = {'iters_Target.dat','c_Target.dat','sharp_Target.dat', ...
+	'timing_Target.dat','solvetiming_Target.dat'};
+formats = {'%d\n','%30.16e\n','%30.16e\n','%16.6e\n','%16.6e\n'};
+values = {lssIts,cHist,sharpHist,tHist(:,end),tHist(:,2)};
+for k = 1:numel(names)
+	fid = fopen(strcat(outPath,names{k}),'w'); fprintf(fid,formats{k},values{k}); fclose(fid);
+end
+end
+
+function exportStandardDesign(outPath, showPlot)
+global meshHierarchy_ densityLayout_;
+allVoxels = zeros(size(meshHierarchy_(1).eleMapForward));
+allVoxels(meshHierarchy_(1).eleMapBack) = densityLayout_;
+isovals = reshape(allVoxels,meshHierarchy_(1).resY,meshHierarchy_(1).resX,meshHierarchy_(1).resZ);
+isovals = smooth3(flip(isovals,1),'box',1);
+faces = isosurface(isovals,0.5); caps = isocaps(isovals,0.5);
+if showPlot
+	patch(faces,'FaceColor',[0 127 0]/255,'EdgeColor','none');
+	patch(caps,'FaceColor',[0 127 0]/255,'EdgeColor','none');
+	view(55,25); axis equal tight off; xlabel('X'); ylabel('Y'); zlabel('Z');
+	lighting gouraud; material dull; camlight('headlight','infinite');
+end
+IO_ExportDesignInTriSurface_stl(strcat(outPath,'DesignVolume.stl'),faces,caps);
+end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         
-function InitialSettings(nelx)
+function InitialSettings()
 	%% Physical Property
 	global modulus_; modulus_ = 1.0; %% Young's modulus	
 	global poissonRatio_; poissonRatio_ = 0.3;	%% Poisson's ratio
 	global modulusMin_; modulusMin_ = 1.0e-6 * modulus_;	
 	global SIMPpenalty_; SIMPpenalty_ = 3;
-	global cellSize_; cellSize_ = 1/nelx;
+	global cellSize_; cellSize_ = 1;
 	global Num_;Num_=4;%size of super element
 	%% Linear System Solver	
 	global tol_; tol_ = 1.0e-3; %% convergence tolerance of iterative linear system solver
@@ -583,7 +876,7 @@ function ceList = TopOpti_ComputeUnitCompliance(U)
 
     Ne        = meshHierarchy_(1).numElements;
     numNodes  = meshHierarchy_(1).numNodes;
-    d_eNodMat = meshHierarchy_(1).d_eNodMat;       % [Ne×8], int32, GPU
+    d_eNodMat = meshHierarchy_(1).d_eNodMat;       % [Ne-by-8], int32, GPU
     d_Ke      = gpuArray(meshHierarchy_(1).Ke);     % [24x24], GPU (576 doubles; transfer overhead negligible)
     nRHS      = size(U, 2);
 
@@ -592,7 +885,7 @@ function ceList = TopOpti_ComputeUnitCompliance(U)
         ithU = U(:, jj);
         if ~isa(ithU, 'gpuArray'), ithU = gpuArray(ithU); end
         uVec = reshape(ithU, 3, numNodes)';         % [numNodes x 3], GPU, zero-copy reshape
-        iReshapedU = zeros(Ne, 24, 'gpuArray');     % [Ne×24], GPU
+        iReshapedU = zeros(Ne, 24, 'gpuArray');     % [Ne-by-24], GPU
         Gathering_inplace(iReshapedU, uVec, d_eNodMat);
         ceList_gpu(:, jj) = sum((iReshapedU * d_Ke) .* iReshapedU, 2);
     end
@@ -630,10 +923,6 @@ global mixed_Precision_;
 		lambda = x1Val / dot(pVec, vVec);
 		y = y + double(lambda * pVec);
 		rVec1 = rVec1 - lambda*vVec;
-        %         % mixed precision: recompute the true residual every 5 steps
-        % if mixed_Precision_ == 1 && mod(its, checkEvery) == 0
-        %  rVec1 = b - AtX(y);
-        % end
 		resnorm = gather(norm(rVec1))/normB;
 		if printP(1)
 			disp([' It.: ' sprintf('%4i',its) ' Res.: ' sprintf('%16.6e',resnorm)]);
@@ -733,11 +1022,11 @@ else
 K_combined = K_combined+ K_fixed; 
 end
 %%Step 2 & 3
-Ke3D = reshape(d_K_mat, 24, 24, []);     % [24×24×N]
+Ke3D = reshape(d_K_mat, 24, 24, []);     % [24-by-24-by-N]
 Ke3D(:,:,d_eleWithFixedDOFs_)=K_combined;
-U3D  = permute(uMat, [2 3 1]);     % [24×1×N]
-res3D = pagemtimes(Ke3D, U3D);     % [24×1×N]
-uMat = permute(res3D, [3 1 2]);     % [N×24]
+U3D  = permute(uMat, [2 3 1]);     % [24-by-1-by-N]
+res3D = pagemtimes(Ke3D, U3D);     % [24-by-1-by-N]
+uMat = permute(res3D, [3 1 2]);     % [N-by-24]
 end
 %%Step 4
 Scattering_inplace(Y, eNodMat, uMat);
@@ -754,10 +1043,10 @@ Y=zeros(numNodes,3,'gpuArray');
 uMat = zeros(size(eNodMat,1),24,'gpuArray');
 end
 Gathering_inplace(uMat, uVec, eNodMat);
-U3D = permute(uMat, [3 2 1]);        % 1 × 24 × numEle
-% Ks: 24 × 24 × numEle
+U3D = permute(uMat, [3 2 1]);        % 1-by-24-by-numEle
+% Ks: 24-by-24-by-numEle
 Uout = pagemtimes(U3D, meshHierarchy_(iLevel).d_Ks);
-uMat = permute(Uout, [3 2 1]);     % numEle × 24
+uMat = permute(Uout, [3 2 1]);     % numEle-by-24
 Scattering_inplace(Y, eNodMat, uMat);
 Y = Y'; Y = double(Y(:));
 wait(gpuDevice);	
@@ -767,11 +1056,10 @@ function x = Solving_Vcycle(r)
     global meshHierarchy_;
     global weightFactorJacobi_;
     global numLevels_;
-    %global typeVcycle_;
 	global cholFac_; global cholPermut_;
 	global mixed_Precision_;
 	global typeVcycle_; 
-    % use cell datastruct
+	% Store multigrid levels in cell arrays.
 	if mixed_Precision_ == 1
         r = single(r);   % explicitly downcast to single precision inside the V-cycle
     end
@@ -782,7 +1070,6 @@ function x = Solving_Vcycle(r)
     %% 1. Restriction (fine -> coarse)
     for ii = 1:numLevels_-1
         x_cell{ii} = d_weightFactorJacobi * (r_cell{ii} ./ meshHierarchy_(ii).d_diagK);
-            %r_cell{ii+1} = Solving_RestrictResidual(r_cell{ii}, ii+1);
 			switch typeVcycle_
 			case 'Adapted'
 				r_cell{ii+1} = Solving_RestrictResidual(r_cell{ii}, ii+1);
@@ -803,7 +1090,6 @@ function x = Solving_Vcycle(r)
     %% 3. Interpolation (coarse -> fine)
     for ii = numLevels_-1:-1:1
         x_cell{ii} = x_cell{ii} + Solving_InterpolationDeviation(x_cell{ii+1}, ii+1);
-         %x_cell{ii} = x_cell{ii} + d_weightFactorJacobi * r_cell{ii} ./ meshHierarchy_(ii).d_diagK;
 		switch typeVcycle_
 			case 'Adapted'
 				x_cell{ii} = x_cell{ii} + d_weightFactorJacobi*r_cell{ii}./meshHierarchy_(ii).d_diagK;
@@ -936,7 +1222,6 @@ function [PDEkernal, diagPrecond] = TopOpti_SetupPDEfilter_matrixFree(filterRadi
 else
 	[Y,X,Z]=size(model);
 	edomat=build_eNodMat_match(Num_*X,Num_*Y,Num_*Z);
-	%elemNew = gpuArray(reorder_fine_elems(edomat, X, Y, Z, Num_));
     [map_old2new, map_new2old] = gen_index_mapping(X, Y, Z, Num_);
     elemNew=gpuArray(edomat(map_new2old,:));
 	clear edomat;
@@ -976,16 +1261,16 @@ function tar = TopOpti_ConductPDEFiltering_matrixFree(src, PDEkernal, diagPrecon
 	
 if Super_element_==0
 tmpVal = gpuArray.zeros(meshHierarchy_(1).numNodes,1);
-iElesNodMat = meshHierarchy_(1).d_eNodMat;         % [Ne × 8] 
+iElesNodMat = meshHierarchy_(1).d_eNodMat;         % [Ne-by-8]
 else
 tmpVal = gpuArray.zeros((Num_*X+1)*(Num_*Y+1)*(Num_*Z+1),1);
 iElesNodMat = elemNew;
 end 
 nPerEle     = size(iElesNodMat, 2);                % = 8
-idx_all     = iElesNodMat(:, 1:nPerEle);           % [Ne × 8]
-idx_all     = idx_all(:);                          % [Ne*8 × 1]
+idx_all     = iElesNodMat(:, 1:nPerEle);           % [Ne-by-8]
+idx_all     = idx_all(:);                          % [Ne*8-by-1]
 
-vals_all    = repmat(values(:), nPerEle, 1);       % [Ne*8 × 1]
+vals_all    = repmat(values(:), nPerEle, 1);       % [Ne*8-by-1]
 if Super_element_==0
 tmpVal = tmpVal + accumarray(idx_all, vals_all, ...
                              [meshHierarchy_(1).numNodes, 1]);
@@ -997,7 +1282,6 @@ end
 	
 	%% Solving on Node
 	PtV = @(x) diagPrecond .* x;
-	%tar = pcg(@MatTimesVec_matrixFree_B, src, 1.0e-6, 200, PtV);
 	tar = Solving_PCG(@MatTimesVec_matrixFree_B, PtV, src, tol_/10, maxIT_, [0 0]);
 
 	%%Node to Element
@@ -1092,9 +1376,6 @@ function Solving_AssembleFEAstencil()
              d_uniqueKesFree_, ...
              d_uniqueKesFixed_);
             if ii==numLevels_, Ks = gather(d_Ks); end   % only the coarsest level needs a CPU Ks (for Cholesky)
-            %wait(gpuDevice);
-            %e1=toc(e1);
-            %fprintf("L2 assembly time: %.3f\n",e1);
             else
             uniqueKeListFixedDOFs = uniqueKesFixed_;
 			uniqueKeListFreeDOFs = uniqueKesFree_;	
@@ -1113,25 +1394,6 @@ function Solving_AssembleFEAstencil()
             if ii==numLevels_, Ks = gather(d_Ks); end
 	end
         else
-            % e1=tic;
-            % KsPrevious = Ks; clear Ks;
-			% Ks = repmat(meshHierarchy_(ii).Ke, 1,1,numElements);	
-			%   jj=1:numElements
-			% 	iFinerEles = elementUpwardMap(jj,:);
-			% 	solidEles = find(0~=iFinerEles);
-			% 	iFinerEles = iFinerEles(solidEles);
-			% 	sK = finerKes;
-			% 	tarKes = KsPrevious(:,:,iFinerEles);
-			% 	for kk=1:length(solidEles)
-			% 		sK(:,solidEles(kk)) = reshape(tarKes(:,:,kk),24^2,1);
-			% 	end
-			% 	tmpK = sparse(iK, jK, sK, numProjectDOFs, numProjectDOFs);
-			% 	tmpK = interpolatingKe' * tmpK * interpolatingKe;
-			% 	Ks(:,:,jj) = full(tmpK);				
-            % end		
-    		% e1=toc(e1);
-            % fprintf("L%d assembly time: %.3f\n",ii,e1);
-            %e1 = tic;
                 % ---- GPU path: use d_Ks from the previous level, already on the GPU ----
                 % meshHierarchy_(ii-1).d_Ks was assigned at the end of the previous
                 % iteration and already resides on the GPU; no extra transfer needed.
@@ -1149,8 +1411,8 @@ function Solving_AssembleFEAstencil()
 		if ii<numLevels_
 			t2 = tic;
 			% d_Ks is [24x24xnumElements]; reshape to [576xnumElements], then extract diagonal with stride 25 -> [numElements x 24]
-			d_Ks_flat     = reshape(meshHierarchy_(ii).d_Ks, 576, []);            % [576×Ne], GPU
-			d_diagKeBlock = d_Ks_flat(1:25:end, :)';                              % [Ne×24],  GPU
+			d_Ks_flat     = reshape(meshHierarchy_(ii).d_Ks, 576, []);            % [576-by-Ne], GPU
+			d_diagKeBlock = d_Ks_flat(1:25:end, :)';                              % [Ne-by-24], GPU
 			d_diagK_out   = zeros(meshHierarchy_(ii).numNodes, 3, 'gpuArray');
 			Scattering_inplace(d_diagK_out, meshHierarchy_(ii).d_eNodMat, d_diagKeBlock);
 			d_diagK_vec = reshape(d_diagK_out.', meshHierarchy_(ii).numDOFs, 1);
@@ -1181,11 +1443,11 @@ function Solving_AssembleFEAstencil()
 	% using the uniqueKes arrays already on the GPU.
 	% d_uniqueKesFree_/Fixed_ are [576 x numBE]; extract diagonal with stride 25 -> [24 x numBE]
 	if ~isempty(bEleIdx)
-		d_diagFree_bd  = d_uniqueKesFree_(1:25:end, bKIdx);           % [24×numBE], GPU
-		d_diagFixed_bd = d_uniqueKesFixed_(1:25:end, bKIdx);          % [24×numBE], GPU
-		d_eleM_bd      = meshHierarchy_(1).d_eleModulus(bEleIdx);     % [numBE×1], GPU
+		d_diagFree_bd  = d_uniqueKesFree_(1:25:end, bKIdx);           % [24-by-numBE], GPU
+		d_diagFixed_bd = d_uniqueKesFixed_(1:25:end, bKIdx);          % [24-by-numBE], GPU
+		d_eleM_bd      = meshHierarchy_(1).d_eleModulus(bEleIdx);     % [numBE-by-1], GPU
 		d_diagKeBlock(bEleIdx, :) = ...
-			(d_diagFree_bd .* d_eleM_bd(:)' + d_diagFixed_bd)';       % [numBE×24]
+			(d_diagFree_bd .* d_eleM_bd(:)' + d_diagFixed_bd)';       % [numBE-by-24]
 	end
 
 	% Step 3: scatter-add via Scattering_inplace MEX (same interface as Solving_KbyU_MatrixFree)
@@ -1238,7 +1500,6 @@ else
 end
 	t_diagL1 = toc(t_diagL1);
 	%% Assemble&Factorize Stiffness Matrix on Coarsest Level
-	%t_coarsest = tic;
 	[rowIndice, colIndice, ~] = find(ones(24));	
 	t_coarsest = tic;
 	sK = zeros(24^2, meshHierarchy_(end).numElements);
@@ -1583,7 +1844,6 @@ function Solving_SetupKeWithFixedDOFs()
 		end
 	end
 	
-	%fixedNodesStruct = nodeBoundaryStruct(fixingCond_(:,1),1);
 	[~,fixedNodeIndices] = intersect(meshHierarchy_(1).nodesOnBoundary, fixingCond_(:,1));
 	fixedNodesStruct = nodeBoundaryStruct(fixedNodeIndices,1);
 	allElementsWithFixedDOFs = unique([fixedNodesStruct.arr]);
@@ -1591,12 +1851,10 @@ function Solving_SetupKeWithFixedDOFs()
 	mapUniqueKes_ = zeros(meshHierarchy_(1).numElements,1,'int32');
 	mapUniqueKes_(allElementsWithFixedDOFs,1) = (1:numElementsWithFixedDOFs)';
 	KeCol = meshHierarchy_(1).Ke(:);
-	% KeListFinestWithFixedDOFs_ = repmat(KeCol,1,numElementsWithFixedDOFs);
 	uniqueKesFree_ = repmat(KeCol,1,numElementsWithFixedDOFs);
 	uniqueKesFixed_ = zeros(size(uniqueKesFree_));
 	for ii=1:numel(fixedNodesStruct)
         iFixation = fixingCond_(ii,:);
-		% iNode = meshHierarchy_(1).nodesOnBoundary(iFixation(1));
 		iNode = iFixation(1);
         iNodeFixationState = iFixation(2:end);
 		iNodEles = fixedNodesStruct(ii).arr;
@@ -1633,17 +1891,10 @@ function Solving_SetupKeWithFixedDOFs()
 			[~,sonElesWithFixedDOFs_(idx).arr] = intersect(sonEles, allElementsWithFixedDOFs);
 		end
 	end
-	% if mixed_Precision_==1
-	% d_uniqueKesFixed_=gpuArray(single(uniqueKesFixed_));
-	% d_uniqueKesFree_=gpuArray(single(uniqueKesFree_));
-	% d_mapUniqueKes_=gpuArray(int32(mapUniqueKes_));
-	% d_eleWithFixedDOFs_=int32(find(d_mapUniqueKes_>0));
-	% else
 	d_uniqueKesFixed_=gpuArray(uniqueKesFixed_);
 	d_uniqueKesFree_=gpuArray(uniqueKesFree_);
 	d_mapUniqueKes_=gpuArray(int32(mapUniqueKes_));
 	d_eleWithFixedDOFs_=int32(find(d_mapUniqueKes_>0));
-	%end
     else
     I_mat=computeK_ij(Num_);
 	allElements = zeros(meshHierarchy_(1).numElements,1,'int32');
@@ -1664,7 +1915,6 @@ function Solving_SetupKeWithFixedDOFs()
 		end
 	end
 	
-	%fixedNodesStruct = nodeBoundaryStruct(fixingCond_(:,1),1);
 	[~,fixedNodeIndices] = intersect(meshHierarchy_(1).nodesOnBoundary, fixingCond_(:,1));
 	fixedNodesStruct = nodeBoundaryStruct(fixedNodeIndices,1);
 	allElementsWithFixedDOFs = unique([fixedNodesStruct.arr]);
@@ -1675,7 +1925,6 @@ function Solving_SetupKeWithFixedDOFs()
 	uniqueKesFixed_ = zeros(24*24,numElementsWithFixedDOFs);
 	for ii=1:numel(fixedNodesStruct)
         iFixation = fixingCond_(ii,:);
-		% iNode = meshHierarchy_(1).nodesOnBoundary(iFixation(1));
 		iNode = iFixation(1);
         iNodeFixationState = iFixation(2:end);
 		iNodEles = fixedNodesStruct(ii).arr;
@@ -1712,17 +1961,10 @@ function Solving_SetupKeWithFixedDOFs()
 			[~,sonElesWithFixedDOFs_(idx).arr] = intersect(sonEles, allElementsWithFixedDOFs);
 		end
 	end
-	% if mixed_Precision_==1
-	% d_uniqueKesFixed_=gpuArray(single(uniqueKesFixed_));
-	% d_uniqueKesFree_=gpuArray(single(uniqueKesFree_));
-	% d_mapUniqueKes_=gpuArray(int32(mapUniqueKes_));
-	% d_eleWithFixedDOFs_=int32(find(d_mapUniqueKes_>0));
-	% else
 	d_uniqueKesFixed_=gpuArray(uniqueKesFixed_);
 	d_uniqueKesFree_=gpuArray(uniqueKesFree_);
 	d_mapUniqueKes_=gpuArray(int32(mapUniqueKes_));
 	d_eleWithFixedDOFs_=int32(find(d_mapUniqueKes_>0));
-	%end
 end
 end
 
@@ -2554,7 +2796,6 @@ dN_dxi  = 0.125 * sx .* fac_xi;
 dN_deta = 0.125 * sy .* fac_eta;
 dN_dzet = 0.125 * sz .* fac_zet;
 
-%J    = diag([a/2, b/2, c/2]);
 detJ = (a*b*c)/8;
 invJ = diag([2/a, 2/b, 2/c]);
 
@@ -2634,9 +2875,9 @@ function ceList = TopOpti_ComputeUnitCompliance_Super(U)
 			tmp = ithU(1:3:end,:); iReshapedU(:,1:3:24) = tmp(iElesNodMat);
 			tmp = ithU(2:3:end,:); iReshapedU(:,2:3:24) = tmp(iElesNodMat);
 			tmp = ithU(3:3:end,:); iReshapedU(:,3:3:24) = tmp(iElesNodMat);		
-			Ke3D = reshape(K_mat(:,rangeIndex), 24, 24, []);   % [24 × 24 × nBlock]
-            U3D  = permute(iReshapedU, [2 3 1]);            % [24 × 1  × nBlock]
-            KU   = pagemtimes(Ke3D, U3D);                   % [24 × 1 × nBlock] -> K_i * u_i
+			Ke3D = reshape(K_mat(:,rangeIndex), 24, 24, []);   % [24-by-24-by-nBlock]
+            U3D  = permute(iReshapedU, [2 3 1]);            % [24-by-1-by-nBlock]
+            KU   = pagemtimes(Ke3D, U3D);                   % [24-by-1-by-nBlock] -> K_i * u_i
             ceBlock3D = sum(KU .* U3D, 1);                  % row-wise dot product u_i^T (K_i u_i)
 			ceList(rangeIndex,jj)=ceBlock3D(:);
 		end		
@@ -2659,10 +2900,10 @@ function dc = pre_compute_der(U)
 			tmp = ithU(1:3:end,:); iReshapedU(:,1:3:24) = tmp(iElesNodMat);
 			tmp = ithU(2:3:end,:); iReshapedU(:,2:3:24) = tmp(iElesNodMat);
 			tmp = ithU(3:3:end,:); iReshapedU(:,3:3:24) = tmp(iElesNodMat); 
-            U3D  = permute(iReshapedU, [2 3 1]);            % [24 × 1  × nBlock]
+            U3D  = permute(iReshapedU, [2 3 1]);            % [24-by-1-by-nBlock]
 			for s=1:64
-            KU   = pagemtimes(KeSet(:,:,s), U3D);   % [24 × 1 × nBlock]
-            e_s  = sum(KU .* U3D, 1);               % [1 × 1 × nBlock] = U^T K U
+            KU   = pagemtimes(KeSet(:,:,s), U3D);   % [24-by-1-by-nBlock]
+            e_s  = sum(KU .* U3D, 1);               % [1-by-1-by-nBlock] = U^T K U
             dc(s, rangeIndex, jj) = e_s(:);
 			end
 		end		
@@ -2705,12 +2946,11 @@ function eNodMat = build_eNodMat_match(nx, ny, nz)
 %   top face:    (1,0,1) (1,1,1) (0,1,1) (0,0,1)
 
     nNodes  = (nx+1) * (ny+1) * (nz+1);
-   % nEles   =  nx    *  ny     *  nz;
 
     % 3D node numbering table (x fastest)
     nodenrs = reshape(1:nNodes, nx+1, ny+1, nz+1);
 
-    % “bottom-left-back” (0,0,0) base node of each element
+    % Bottom-left-back (0,0,0) base node of each element.
     base = nodenrs(1:nx, 1:ny, 1:nz);   % nx x ny x nz
     eNodVec = base(:);                  % nEles x 1
 

@@ -11,9 +11,6 @@
 // Each thread owns exactly one scalar entry (row, col) of the output matrix;
 // four 24x24 working matrices (B, Kch, Ttmp, Kout) live in shared memory.
 //
-// Shared memory uses stride KPAD=25 instead of KDIM=24: gcd(24,32)=8 causes
-// 6-way bank conflicts at stride 24, while 25 is coprime with 32, eliminating
-// read conflicts and reducing write conflicts to at most 2-way.
 // Global memory accesses use the unpadded stride (tx = row + col*KDIM) for coalescing.
 //
 // Index conventions:
@@ -37,14 +34,13 @@
 
 static constexpr int KDIM     = 24;           // matrix dimension
 static constexpr int KMAT     = KDIM * KDIM;  // 576: unpadded size, used for global memory indexing
-static constexpr int KPAD     = 25;           // padded stride (coprime with 32, eliminates bank conflicts)
+static constexpr int KPAD     = 25;
 static constexpr int KMAT_PAD = KDIM * KPAD;  // 600: elements per padded matrix in shared memory
 
 // ---------------------------------------------------------------------------
 // Core kernel: gridDim.x = nElem, blockDim.x = KMAT = 576 (18 full warps).
 //
 // Thread tx handles matrix entry (row = tx%KDIM, col = tx/KDIM).
-// Shared memory index: pidx = row + col*KPAD (padded layout, eliminates bank conflicts).
 // Global memory index: tx   = row + col*KDIM (unpadded, guarantees coalesced access).
 //
 // Shared memory layout: [B | Kch | Ttmp | Kout], each KMAT_PAD = 600 elements of T.
@@ -120,10 +116,8 @@ __global__ void assembleKs_kernel(
         // Ttmp[row, col] = sum_k  Kch[row, k] * B[k, col]
         //
         // Kch[row, k] = Kch[row + k*KPAD]
-        //   row is fixed during the k loop -> stride=KPAD=25 (coprime with 32) -> zero bank conflict
         //
         // B[k, col] = B[k + col*KPAD]
-        //   threads in the same warp share the same col -> L1 broadcast, zero conflict
         {
             T acc = (T)0;
             #pragma unroll
@@ -138,11 +132,8 @@ __global__ void assembleKs_kernel(
         // Kout[row, col] += sum_k  B[k, row] * Ttmp[k, col]
         //
         // B[k, row] = B[k + row*KPAD]
-        //   row is fixed during the k loop -> stride=KPAD=25 (coprime with 32) -> zero bank conflict
-        //   This is exactly the access that caused 6-way conflicts with KDIM=24; KPAD fixes it.
         //
         // Ttmp[k, col] = Ttmp[k + col*KPAD]
-        //   same col per warp -> L1 broadcast, zero conflict
         {
             T acc = (T)0;
             #pragma unroll

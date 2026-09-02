@@ -12,6 +12,7 @@ CLAUDE.md
 
 # Output directories generated at runtime
 out/
+topX3D_results/
 
 # Large data files (distributed separately)
 data/

@@ -1,5 +1,5 @@
-% compile_all.m — compile all CUDA MEX kernels
-cd('C:\Users\Sherman\Desktop\上传');
+% compile_all.m - compile all CUDA MEX kernels
+cd(fileparts(mfilename('fullpath')));
 flags = 'NVCCFLAGS="--allow-unsupported-compiler -arch=sm_89"';
 
 files = {

@@ -46,7 +46,7 @@
 
 static const int KDIM     = 24;
 static const int KMAT     = KDIM * KDIM;   // 576
-static const int KPAD     = 25;            // stride coprime with 32 -> zero bank conflict
+static const int KPAD     = 25;
 static const int KMAT_PAD = KDIM * KPAD;  // 600
 static const int NSUB_MOD = 64;           // sub-voxels per super-element
 
@@ -54,7 +54,6 @@ static const int NSUB_MOD = 64;           // sub-voxels per super-element
 // Kernel: one block per coarse element, 576 threads (18 full warps).
 //
 // Thread tx handles matrix entry (row = tx%24, col = tx/24).
-// Shared memory index: pidx = row + col*KPAD  (padded, zero bank conflict).
 // Global memory index: tx   = row + col*KDIM  (unpadded, coalesced).
 //
 // Per sub-element s:
@@ -142,8 +141,6 @@ __global__ void assemble_level2_superEle_kernel(
         __syncthreads();
 
         // First multiply: Ttmp = Ksub * B
-        // Ksub[row,k] = Ksub[row + k*KPAD]: stride KPAD=25 coprime with 32 -> zero conflict
-        // B[k,col]    = B[k + col*KPAD]:    same col per warp -> L1 broadcast
         {
             T acc = (T)0;
             #pragma unroll
@@ -155,8 +152,6 @@ __global__ void assemble_level2_superEle_kernel(
         __syncthreads();
 
         // Second multiply: Kout += B^T * Ttmp
-        // B[k,row]    = B[k + row*KPAD]:    stride KPAD -> zero conflict
-        // Ttmp[k,col] = Ttmp[k + col*KPAD]: same col per warp -> broadcast
         {
             T acc = (T)0;
             #pragma unroll

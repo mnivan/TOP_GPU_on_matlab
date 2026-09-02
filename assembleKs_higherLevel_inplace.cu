@@ -12,8 +12,7 @@
 //   Level 2:      Ksub_s = eleModulus[s] * Ke_unit  (+ boundary correction)
 //   This kernel:  Ksub_s = KsPrev[:, :, fineEle]    (direct table lookup from
 //                          the previous level; simpler, no modulus multiply)
-//   All other logic (KPAD=25 bank-conflict elimination, two matrix multiplies,
-//   coalesced I/O) is identical.
+//   All other logic (two matrix multiplies and coalesced I/O) is identical.
 //
 // Interface:
 //   assembleKs_higherLevel_inplace(d_Ks, d_upMap, d_KsPrev, d_Psub)
@@ -39,7 +38,7 @@
 
 static constexpr int KDIM     = 24;
 static constexpr int KMAT     = KDIM * KDIM;   // 576: unpadded size, used for global memory indexing
-static constexpr int KPAD     = 25;            // padded stride (coprime with 32, eliminates bank conflicts)
+static constexpr int KPAD     = 25;
 static constexpr int KMAT_PAD = KDIM * KPAD;   // 600: elements per matrix in shared memory (padded)
 
 // ---------------------------------------------------------------------------
@@ -47,10 +46,10 @@ static constexpr int KMAT_PAD = KDIM * KPAD;   // 600: elements per matrix in sh
 //
 // Thread tx handles matrix entry (row = tx%KDIM, col = tx/KDIM).
 // tx   = row + col*KDIM  -> global memory index (unpadded, coalesced access)
-// pidx = row + col*KPAD  -> shared memory index (KPAD=25 eliminates bank conflicts)
+// pidx = row + col*KPAD  -> shared memory index
 //
 // Ksub is read directly from d_KsPrev[fineEle * 576 + tx] (coalesced);
-// no scalar multiply or boundary correction needed — simpler than the level-2 kernel.
+// No scalar multiply or boundary correction is needed; this is simpler than level 2.
 //
 // Shared memory layout: [B | Ksub | Ttmp | Kout], each 600 elements of type T.
 //   double: 4 * 600 * 8 = 19 200 bytes/block
@@ -98,8 +97,6 @@ __global__ void assemble_higherLevel_kernel(
         __syncthreads();  // barrier 1: B and Ksub are visible to all threads in the block
 
         // ---- First matrix multiply: Ttmp = Ksub * B ----
-        // Ksub[row, k] = Ksub[row + k*KPAD], stride=25 (coprime with 32) -> zero bank conflict
-        // B[k, col]    = B[k + col*KPAD], same col per warp -> L1 broadcast
         {
             T acc = (T)0;
             #pragma unroll
@@ -111,8 +108,6 @@ __global__ void assemble_higherLevel_kernel(
         __syncthreads();  // barrier 2: Ttmp is visible to all threads in the block
 
         // ---- Second matrix multiply: Kout += B^T * Ttmp ----
-        // B[k, row]    = B[k + row*KPAD],    stride=25 (coprime with 32) -> zero bank conflict
-        // Ttmp[k, col] = Ttmp[k + col*KPAD], same col per warp -> L1 broadcast
         {
             T acc = (T)0;
             #pragma unroll
