@@ -63,6 +63,7 @@ filters. Do not pass `ft`, `filter_method`, `mixed_Precision`, or
 | `rMin` | `sqrt(3)` | Filter radius in voxels |
 | `rHat` | `6` | PIO local-volume influence radius |
 | `nLoop` | TO: `50`, PIO: `300` | Maximum optimization iterations |
+| `tol` | `1e-3` | PCG relative-residual tolerance for TO and PIO |
 | `ft` | `1` | TO only: `1` = sensitivity filter, `2` = density filter |
 | `filter_method` | `'pde'` | TO only: `'pde'` or distance-based `'distance'` |
 | `mixed_Precision` | `0` | TO only: `0` = double precision, `1` = mixed (single inside V-cycle) |

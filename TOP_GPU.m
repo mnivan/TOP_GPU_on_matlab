@@ -3,7 +3,7 @@ function TOP_GPU(inputModel, varargin)
 %
 % Global-volume topology optimization:
 %   TOP_GPU(true(nely,nelx,nelz), 'consType','GLOBAL', 'V0',0.12, ...
-%       'ft',2, 'filter_method','pde')
+%       'ft',2, 'filter_method','pde', 'tol',1e-3)
 %
 % Local-volume porous infill optimization:
 %   TOP_GPU(true(nely,nelx,nelz), 'consType','LOCAL', 'V0',0.5, ...
@@ -57,6 +57,7 @@ addParameter(p, 'ft',               1, @(v) isnumeric(v) && isscalar(v) && ismem
 addParameter(p, 'filter_method',    'pde', @(v) ischar(v) || (isstring(v) && isscalar(v)));
 addParameter(p, 'mixed_Precision',  0);
 addParameter(p, 'super_element',    0);
+addParameter(p, 'tol',           1e-3, @(v) isnumeric(v) && isreal(v) && isscalar(v) && isfinite(v) && v > 0);
 parse(p, inputModel, varargin{:});
 
 V0              = p.Results.V0;
@@ -67,6 +68,7 @@ filter_method   = lower(char(p.Results.filter_method));
 mixed_Precision = p.Results.mixed_Precision;
 super_element   = p.Results.super_element;
 optCase_in      = p.Results.optCase;
+solverTol       = p.Results.tol;
 
 if ~ismember(filter_method, {'pde', 'distance'})
 	error('TOP_GPU:InvalidFilterMethod', ...
@@ -100,13 +102,12 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 		[nely_sz, nelx_sz, nelz_sz] = size(inputModel);
 		folderName = sprintf('case%d_%dx%dx%d_TO_V%.4g_r%.4g_ft%d_fm%s_n%d_mp%d_se%d', ...
 			optCase_in, nelx_sz, nely_sz, nelz_sz, V0, rMin, ft, filter_method, nLoop, mixed_Precision, super_element);
-		InitialSettings();
 	else
 		[~, modelName, ~] = fileparts(inputModel);
 		folderName = sprintf('%s_TO_V%.4g_r%.4g_ft%d_fm%s_n%d_mp%d_se%d', ...
 			modelName, V0, rMin, ft, filter_method, nLoop, mixed_Precision, super_element);
-		InitialSettings();
 	end
+	InitialSettings(); tol_ = solverTol;
 	outPath = createUniqueOutputPath(folderName);
 	fid = fopen(strcat(outPath, 'RunLog.log'), 'w'); fclose(fid); diary(strcat(outPath, 'RunLog.log'));
 	
@@ -116,6 +117,7 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 	disp(['..........................................Filter Radius: ', sprintf('%6.4f', rMin), ' Cells']);
 	disp(['............................................Filter Type: ', sprintf('%1i', ft)]);
 	disp(['..........................................Filter Method: ', filter_method]);
+	disp(['..............................................PCG Tolerance: ', sprintf('%6.4e', tol_)]);
 	disp(['................................................Cell Size: ', sprintf('%6.4e', cellSize_)]);
 	disp(['...............................................#MGCG Iterations: ', sprintf('%4i', maxIT_)]);
 	disp(strcat('.....................................................V-cycle: ', " ", typeVcycle_));
@@ -430,10 +432,12 @@ addParameter(p, 'V0',      0.5);
 addParameter(p, 'rMin',    sqrt(3));
 addParameter(p, 'rHat',    6, @(v) isnumeric(v) && isreal(v) && isscalar(v) && isfinite(v) && v > 0);
 addParameter(p, 'nLoop',   300);
+addParameter(p, 'tol',  1e-3, @(v) isnumeric(v) && isreal(v) && isscalar(v) && isfinite(v) && v > 0);
 parse(p, inputModel, varargin{:});
 
 Ve0 = p.Results.V0; rMin = p.Results.rMin; rHat = p.Results.rHat;
 nLoop = p.Results.nLoop; optCase_in = p.Results.optCase;
+solverTol = p.Results.tol;
 
 reset(gpuDevice);
 global mixed_Precision_; mixed_Precision_ = 0;
@@ -455,6 +459,7 @@ else
 		modelName, Ve0, rMin, rHat, nLoop);
 end
 InitialSettings();
+tol_ = solverTol;
 outPath = createUniqueOutputPath(folderName);
 fid = fopen(strcat(outPath, 'RunLog.log'), 'w'); fclose(fid); diary(strcat(outPath, 'RunLog.log'));
 
@@ -464,6 +469,7 @@ disp(['.......................................Effecting Radius: ', sprintf('%6.4
 disp(['..........................................Filter Radius: ', sprintf('%6.4f', rMin), ' Cells']);
 disp('.................................................Optimization: PIO');
 disp('.................................................Filter Method: PDE');
+disp(['..............................................PCG Tolerance: ', sprintf('%6.4e', tol_)]);
 disp(['................................................Cell Size: ', sprintf('%6.4e', cellSize_)]);
 disp(['...............................................#MGCG Iterations: ', sprintf('%4i', maxIT_)]);
 disp(strcat('.....................................................V-cycle: ', " ", typeVcycle_));

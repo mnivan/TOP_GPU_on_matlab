@@ -1,5 +1,5 @@
-function topX3D_GPU_MF(nelx,nely,nelz,volfrac,penal,rmin,ft,varargin)
-%TOPX3D_GPU_MF 3-D periodic material optimization using CUDA MEX kernels.
+function topX3D_GPU(nelx,nely,nelz,volfrac,penal,rmin,ft,varargin)
+%TOPX3D_GPU 3-D periodic material optimization using CUDA MEX kernels.
 %   This is the 3-D counterpart of topX_GPU_MF. It uses trilinear H8
 %   voxels, six unit macro-strain cases, periodic fluctuation fields, GPU
 %   PCG, Gathering_inplace/Scattering_inplace, and no assembled global
@@ -393,4 +393,3 @@ if isa(value,'gpuArray')
     value = gather(value);
 end
 end
-
