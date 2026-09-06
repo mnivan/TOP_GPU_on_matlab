@@ -175,7 +175,7 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 	if Super_element_==0
 	x = gpuArray(repmat(V0, numElements, 1));
 	else
-	x = gpuArray(repmat(V0, 4^3, numElements));
+	x = gpuArray(repmat(V0, Num_^3, numElements));
 	end
     xPhys = x;
 	loop = 0;
@@ -280,13 +280,13 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 				end
 			else
 			dc=dc(:);
-			 dc = imfilter(reshape(dc(map_old2new), 4*nely, 4*nelx, 4*nelz ) ./ Hs, h, bcF );
+			 dc = imfilter(reshape(dc(map_old2new), Num_*nely, Num_*nelx, Num_*nelz ) ./ Hs, h, bcF );
 			 dc=dc(:);
-			 dc=reshape(dc(map_new2old),64,[]);
+			 dc=reshape(dc(map_new2old),Num_^3,[]);
 			dv=dv(:);
-			 dv = imfilter( reshape(dv(map_old2new), 4*nely, 4*nelx, 4*nelz ) ./ Hs, h, bcF );
+			 dv = imfilter( reshape(dv(map_old2new), Num_*nely, Num_*nelx, Num_*nelz ) ./ Hs, h, bcF );
 			 dv=dv(:);
-			 dv=reshape(dv(map_new2old),64,[]);
+			 dv=reshape(dv(map_new2old),Num_^3,[]);
 			end
         end
 		itimeDensityFiltering = toc(tPDEfilteringClock);
@@ -306,7 +306,7 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 			while (l2-l1)/(l1+l2) > 1e-6
 			lmid = 0.5*(l2+l1);
 			xnew = max(0,max(x-move,min(1,min(x+move,x.*sqrt(-dc./dv/lmid)))));
-			xnew(Num_,passiveElements) = 1.0;
+			xnew(:,passiveElements) = 1.0;
 			gt = fval + mean(dv(:).*(xnew(:)-x(:)));
 			if gt>0, l1 = lmid; else l2 = lmid; end				
     		end	
@@ -329,9 +329,9 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 				end
 			else
 			xnew=xnew(:);
-			xPhys=imfilter(reshape(xnew(map_old2new), 4*nely, 4*nelx, 4*nelz ), h, bcF ) ./ Hs;
+			xPhys=imfilter(reshape(xnew(map_old2new), Num_*nely, Num_*nelx, Num_*nelz ), h, bcF ) ./ Hs;
 			xPhys=xPhys(:);
-			xPhys=reshape(xPhys(map_new2old),64,[]);
+			xPhys=reshape(xPhys(map_new2old),Num_^3,[]);
     	    end
         end
 		itimeDensityFiltering = itimeDensityFiltering + toc(tPDEfilteringClock);
@@ -339,7 +339,7 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 		xPhys(passiveElements,1) = 1;
 		sharpness = 4*sum(sum(xPhys.*(ones(numElements,1)-xPhys)))/numElements;
 		else
-		xPhys(Num_,passiveElements) = 1;
+		xPhys(:,passiveElements) = 1;
 		sharpness = 4*sum(sum(xPhys(:).*(gpuArray.ones(numElements*Num_^3,1)-xPhys(:))))/(numElements*Num_^3);
         end
 		itimeTotal = toc(perIteCost);
@@ -972,6 +972,7 @@ function Y = Solving_KbyU_MatrixFree(uVec, varargin)
 	global d_eleWithFixedDOFs_;
 	global mixed_Precision_;
 	global Super_element_;
+	global Num_;
 	global d_K_mat;
 	if 1==nargin, iLevel = 1; end
 	if 2==nargin, iLevel = varargin{1}; end
@@ -1015,8 +1016,8 @@ uMat=uMat*K_0.*E_e(:);
 uMat(d_eleWithFixedDOFs_,:)=Y_fixed;
 else
 	% 1) [24,24,N]
-K_free  = reshape(d_uniqueKesFree_,  24*24,64, N_b);%[24*24,64,N]
-Ee_fixed   = reshape(E_e(:,d_eleWithFixedDOFs_), 1, 64, N_b); % [1,64,N]
+K_free  = reshape(d_uniqueKesFree_, 24*24, Num_^3, N_b);
+Ee_fixed = reshape(E_e(:,d_eleWithFixedDOFs_), 1, Num_^3, N_b);
 K_combined = sum(K_free .* Ee_fixed, 2);%[24*24,1,N]
 K_combined=squeeze(K_combined);
 K_combined=reshape(K_combined,24,24,N_b);
@@ -1337,6 +1338,7 @@ function Solving_AssembleFEAstencil()
 	global I_mat;
 	global K_mat;
 	global d_K_mat;
+	global Num_;
 	%% Compute 'Ks' on Coarser Levels
 	reOrdering = [1 9 17 2 10 18 3 11 19 4 12 20 5 13 21 6 14 22 7 15 23 8 16 24];
 	t_asm  = zeros(1, numLevels_-1);       % Ks assembly time per level (index = ii-1)
@@ -1482,7 +1484,7 @@ else
 		eleWithFixedDOFsLocal = jTarEles(eleWithFixedDOFs);
 		numTarEles = numel(eleWithFixedDOFs);
 		for kk=1:numTarEles
-			coeff = reshape(eleModulus(:,eleWithFixedDOFs(kk)), 1, 64, []);
+			coeff = reshape(eleModulus(:,eleWithFixedDOFs(kk)), 1, Num_^3, []);
 			combined = sum(uniqueKeListFreeDOFs(:,:,eleWithFixedDOFsLocal(kk)) .* coeff, 2);%[24*24,1,1]
 			kKeFreeDOFs=reshape(combined,24,24);
 			kKeFixedDOFs = reshape(uniqueKeListFixedDOFs(:,eleWithFixedDOFsLocal(kk)), 24, 24);
@@ -2891,11 +2893,13 @@ function ceList = TopOpti_ComputeUnitCompliance_Super(U)
 	ceList = ceList*objWeightingList_(:);
 end
 function dc = pre_compute_der(U)
-    global meshHierarchy_;	
+    global meshHierarchy_;
 	global objWeightingList_;
 	global I_mat;
-	KeSet = reshape(I_mat, 24, 24, 64);
-	dc=zeros(4^3,meshHierarchy_(1).numElements,size(U,2));
+	global Num_;
+	nSub = Num_^3;
+	KeSet = reshape(I_mat, 24, 24, nSub);
+	dc=zeros(nSub,meshHierarchy_(1).numElements,size(U,2));
 	blockIndex = Solving_MissionPartition(meshHierarchy_(1).numElements, 1.0e7);
 	for jj=1:size(U,2)
 		ithU = U(:,jj);
@@ -2907,7 +2911,7 @@ function dc = pre_compute_der(U)
 			tmp = ithU(2:3:end,:); iReshapedU(:,2:3:24) = tmp(iElesNodMat);
 			tmp = ithU(3:3:end,:); iReshapedU(:,3:3:24) = tmp(iElesNodMat); 
             U3D  = permute(iReshapedU, [2 3 1]);            % [24-by-1-by-nBlock]
-			for s=1:64
+			for s=1:nSub
             KU   = pagemtimes(KeSet(:,:,s), U3D);   % [24-by-1-by-nBlock]
             e_s  = sum(KU .* U3D, 1);               % [1-by-1-by-nBlock] = U^T K U
             dc(s, rangeIndex, jj) = e_s(:);

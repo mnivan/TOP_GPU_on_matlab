@@ -10,9 +10,10 @@
 //     Ksub = d_Ks0[:, fineEle]          (pre-computed as I_mat * eleModulus, [576 x nFineElem])
 //
 //   Sub-element with fixed DOFs:
-//     Ksub[tx] = sum_{q=0..63}  d_uniqueFree[(uid)*576*64 + q*576 + tx] * d_eleModulus[(fineEle)*64 + q]
+//     Ksub[tx] = sum_q d_uniqueFree[(uid)*576*nSubMod + q*576 + tx]
+//                         * d_eleModulus[(fineEle)*nSubMod + q]
 //              + d_uniqueFixed[(uid)*576 + tx]
-//     i.e. a weighted sum over 64 sub-voxel moduli, replacing the single scalar multiply.
+//     i.e. a weighted sum over all sub-voxel moduli, replacing the single scalar multiply.
 //
 // Interface (8 inputs, same count as standard version):
 //   prhs[0]  d_Ks          [24x24xnElem]        double/float gpuArray  (in-place output)
@@ -20,8 +21,8 @@
 //   prhs[2]  d_Ks0         [576 x nFineElem]     double/float gpuArray
 //   prhs[3]  d_Psub        [24 x 24 x nSub]      double/float gpuArray
 //   prhs[4]  d_mapUnique   [nFineElem]            int32 gpuArray  (1-based uid, 0=none)
-//   prhs[5]  d_eleModulus  [64 x nFineElem]       double/float gpuArray
-//   prhs[6]  d_uniqueFree  [576 x 64 x nUnique]  double/float gpuArray  (may be empty)
+//   prhs[5]  d_eleModulus  [nSubMod x nFineElem]       double/float gpuArray
+//   prhs[6]  d_uniqueFree  [576 x nSubMod x nUnique]  double/float gpuArray  (may be empty)
 //   prhs[7]  d_uniqueFixed [576 x nUnique]        double/float gpuArray  (may be empty)
 //
 // Launch config  : gridDim.x = nElem,  blockDim.x = 576 (18 warps)
@@ -48,7 +49,6 @@ static const int KDIM     = 24;
 static const int KMAT     = KDIM * KDIM;   // 576
 static const int KPAD     = 25;
 static const int KMAT_PAD = KDIM * KPAD;  // 600
-static const int NSUB_MOD = 64;           // sub-voxels per super-element
 
 // ---------------------------------------------------------------------------
 // Kernel: one block per coarse element, 576 threads (18 full warps).
@@ -76,7 +76,7 @@ __global__ void assemble_level2_superEle_kernel(
     const T* __restrict__       d_eleModulus,
     const T* __restrict__       d_uniqueFree,
     const T* __restrict__       d_uniqueFixed,
-    int nElem, int nSub, int nUnique)
+    int nElem, int nSub, int nSubMod, int nUnique)
 {
     const int e = blockIdx.x;
     if (e >= nElem) return;
@@ -115,19 +115,17 @@ __global__ void assemble_level2_superEle_kernel(
             uid1 = __ldg(&d_mapUnique[fineEle0]);
 
         if (uid1 > 0) {
-            // Fixed-DOF sub-element: weighted sum over 64 sub-voxels
-            // uniqueFree layout [576 x 64 x nUnique] col-major:
-            //   element (tx, q, uid0) at  uid0*576*64 + q*576 + tx
-            // eleModulus layout [64 x nFineElem] col-major:
-            //   element (q, fineEle0) at  fineEle0*64 + q
+            // Fixed-DOF sub-element: weighted sum over all sub-voxels
+            // uniqueFree layout [576 x nSubMod x nUnique] col-major.
+            // eleModulus layout [nSubMod x nFineElem] col-major.
             const int32_t uid0      = uid1 - 1;
-            const size_t  freeBase  = (size_t)uid0 * KMAT * NSUB_MOD;
+            const size_t  freeBase  = (size_t)uid0 * KMAT * nSubMod;
             const size_t  fixedBase = (size_t)uid0 * KMAT;
-            const size_t  modBase   = (size_t)fineEle0 * NSUB_MOD;
+            const size_t  modBase   = (size_t)fineEle0 * nSubMod;
 
             T acc = (T)0;
             #pragma unroll 8
-            for (int q = 0; q < NSUB_MOD; ++q)
+            for (int q = 0; q < nSubMod; ++q)
                 acc += __ldg(&d_uniqueFree[freeBase + (size_t)q * KMAT + tx])
                      * __ldg(&d_eleModulus[modBase + q]);
 
@@ -235,24 +233,31 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         mexErrMsgIdAndTxt("assembleKs_level2_superEle_inplace:Shape",
             "d_Psub must be [24 x 24 x nSub].");
 
-    if (mxGPUGetNumberOfElements(gEleMod) % NSUB_MOD != 0)
+    const mwSize* emDims = mxGPUGetDimensions(gEleMod);
+    if (mxGPUGetNumberOfDimensions(gEleMod) != 2 || emDims[0] == 0)
         mexErrMsgIdAndTxt("assembleKs_level2_superEle_inplace:Shape",
-            "d_eleModulus total elements must be a multiple of 64.");
+            "d_eleModulus must be [nSubMod x nFineElem].");
+    const int nSubMod = (int)emDims[0];
 
     int nUnique = 0;
     if (mxGPUGetNumberOfElements(gUniqueFree) > 0) {
         const mwSize* ufDims = mxGPUGetDimensions(gUniqueFree);
         mwSize        ufNdim = mxGPUGetNumberOfDimensions(gUniqueFree);
         if (ufNdim == 3) {
-            if (ufDims[0] != 576 || (int)ufDims[1] != NSUB_MOD)
+            if (ufDims[0] != 576 || (int)ufDims[1] != nSubMod)
                 mexErrMsgIdAndTxt("assembleKs_level2_superEle_inplace:Shape",
-                    "d_uniqueFree must be [576 x 64 x nUnique].");
+                    "d_uniqueFree must be [576 x nSubMod x nUnique].");
             nUnique = (int)ufDims[2];
         } else if (ufNdim == 2) {
-            if ((int)ufDims[0] != KMAT * NSUB_MOD)
+            if ((int)ufDims[0] == KMAT && (int)ufDims[1] == nSubMod) {
+                nUnique = 1;
+            } else if ((int)ufDims[0] == KMAT * nSubMod) {
+                nUnique = (int)ufDims[1];
+            } else {
                 mexErrMsgIdAndTxt("assembleKs_level2_superEle_inplace:Shape",
-                    "d_uniqueFree must be [576*64 x nUnique] or [576 x 64 x nUnique].");
-            nUnique = (int)ufDims[1];
+                    "d_uniqueFree must be [576*nSubMod x nUnique] or "
+                    "[576 x nSubMod x nUnique].");
+            }
         } else {
             mexErrMsgIdAndTxt("assembleKs_level2_superEle_inplace:Shape",
                 "d_uniqueFree must be 2-D or 3-D.");
@@ -292,7 +297,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
             dMap,
             (const float*)dEM,
             (const float*)dUF, (const float*)dUX,
-            nElem, nSub, nUnique);
+            nElem, nSub, nSubMod, nUnique);
     } else {
         const size_t shmem = 4 * KMAT_PAD * sizeof(double);
         assemble_level2_superEle_kernel<double><<<grid, block, shmem>>>(
@@ -301,7 +306,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
             dMap,
             (const double*)dEM,
             (const double*)dUF, (const double*)dUX,
-            nElem, nSub, nUnique);
+            nElem, nSub, nSubMod, nUnique);
     }
 
     CHECK_CUDA(cudaGetLastError());
