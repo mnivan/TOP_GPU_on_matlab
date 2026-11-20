@@ -1,0 +1,146 @@
+[
+  {
+    "path": "out/benchmark/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n50_mp0_se0_L4/DesignVolume.nii",
+    "sha256": "6497785b012131e023f594a41aad4b520882218b5379bfb949f445fe881e3974",
+    "archive": "out/benchmark/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n50_mp0_se0_L4/DesignVolume.nii.gz",
+    "archive_sha256": "8b3786129c0cae25524fb46de7847f3d86583a44c71001deeaffe92ea4378cec"
+  },
+  {
+    "path": "out/benchmark/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n50_mp0_se0_L4_t1/DesignVolume.nii",
+    "sha256": "28f92639dba57364390075d296e1a89c1723e7ffa24b1223e67579991f1cfc43",
+    "archive": "out/benchmark/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n50_mp0_se0_L4_t1/DesignVolume.nii.gz",
+    "archive_sha256": "ab3bfc2033140832c7ac35ac278bbb817c7c14bb50d119fe54fea739556967c8"
+  },
+  {
+    "path": "out/benchmark/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n50_mp0_se0_L4_t2/DesignVolume.nii",
+    "sha256": "19015b65a15b0cd170a7c9a9bb4eb4828858722c6b3649e514d773583d747f50",
+    "archive": "out/benchmark/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n50_mp0_se0_L4_t2/DesignVolume.nii.gz",
+    "archive_sha256": "ef2a30f87ea1497053c5dbc1055f89a92b201c8340efc247ff129b5f62d67a1a"
+  },
+  {
+    "path": "out/benchmark/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n50_mp0_se0_L4_t3/DesignVolume.nii",
+    "sha256": "62244e3223d168ed410011251937facda8134585e8611e41dcec26dc7c8b1f94",
+    "archive": "out/benchmark/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n50_mp0_se0_L4_t3/DesignVolume.nii.gz",
+    "archive_sha256": "9e430d21242a96d0beb7cb091bb56854b4824eaea3167bd6ceeb1c722e258ab5"
+  },
+  {
+    "path": "out/benchmark/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n50_mp0_se0_L4_t4/DesignVolume.nii",
+    "sha256": "cd8aaa2c9315f4d910c7e7d075d0eabfff8ea93044efb5fd0362d5ecc03637e1",
+    "archive": "out/benchmark/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n50_mp0_se0_L4_t4/DesignVolume.nii.gz",
+    "archive_sha256": "1ff7b44fa2bded34c4d81f150a63d4c2c5b976287b9ba25a36848131c150862f"
+  },
+  {
+    "path": "out/memory/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n5_mp0_se0_L3/DesignVolume.nii",
+    "sha256": "914f34e0a911eed16862cbfe7735dfe01966cca4b134563702ee0d598b05407e",
+    "archive": "out/memory/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n5_mp0_se0_L3/DesignVolume.nii.gz",
+    "archive_sha256": "64c630e8f641502f73e144ae7d7102d4a20c57788936c654fa8f8778b79e3369"
+  },
+  {
+    "path": "out/memory/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n5_mp0_se0_L3_t1/DesignVolume.nii",
+    "sha256": "545cc77db797d2a46e1c264cbfc3df2a9a21beefd7b5dc989d01eb72a56e10af",
+    "archive": "out/memory/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n5_mp0_se0_L3_t1/DesignVolume.nii.gz",
+    "archive_sha256": "46bf3eb0f2de91987fdcf65693ebca25c18ff18dee7a4362fdc0d2a5d0b4ad42"
+  },
+  {
+    "path": "out/memory/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n5_mp0_se0_L4/DesignVolume.nii",
+    "sha256": "7470edf4b35f3e72e0698e48acf2b9e9d3dc4c50287aa84c38d17811dfb7fb57",
+    "archive": "out/memory/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n5_mp0_se0_L4/DesignVolume.nii.gz",
+    "archive_sha256": "bc02a312cf857f2b4d54b1958e72eb1db9649835a201aff707a3f878bd54e5ff"
+  },
+  {
+    "path": "out/memory/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n5_mp0_se0_L4_t1/DesignVolume.nii",
+    "sha256": "37055506a5c85697d71675220af2ead7eea70175ba8b669d7b4b35fc29ac5da5",
+    "archive": "out/memory/case1_384x192x192_TO_V0.12_r1.732_ft2_fmpde_n5_mp0_se0_L4_t1/DesignVolume.nii.gz",
+    "archive_sha256": "158d245e485207b6221f5daf8e682ece1f31fc1ebeecfa9ff5d82b9db9bbd3e4"
+  },
+  {
+    "path": "out/mtop/case1_384x192x192_TO_V0.12_r1.732_ft2_fmdistance_n200_mp0_se0/DesignVolume.nii",
+    "sha256": "8a2822a3c7f4ef7122d5381f0b244844bbd8e7684d4ae0f3b0a005a0bf4bcb65",
+    "archive": "out/mtop/case1_384x192x192_TO_V0.12_r1.732_ft2_fmdistance_n200_mp0_se0/DesignVolume.nii.gz",
+    "archive_sha256": "4f0d8d73fa8798a4cf102989ed096fb197be154ef6dcec379ed299e1ecc7da02"
+  },
+  {
+    "path": "out/mtop/case1_384x192x192_TO_V0.12_r3.464_ft2_fmdistance_n200_mp0_se0/DesignVolume.nii",
+    "sha256": "29cd457be8eca31d0be0e2fe9f449721770a03b499b59eb17b73b01ca2df2924",
+    "archive": "out/mtop/case1_384x192x192_TO_V0.12_r3.464_ft2_fmdistance_n200_mp0_se0/DesignVolume.nii.gz",
+    "archive_sha256": "ba961372840f7b0e6e4d2ec56b408a9c4fe5135e55a2516ebe6dc2bcc27cf60c"
+  },
+  {
+    "path": "out/mtop/case1_384x192x192_TO_V0.12_r6.928_ft2_fmdistance_n200_mp0_se0/DesignVolume.nii",
+    "sha256": "4c712c751671f5a7cb4d2deaacea11c196e0b4138497efe8af0ad37b300c01cb",
+    "archive": "out/mtop/case1_384x192x192_TO_V0.12_r6.928_ft2_fmdistance_n200_mp0_se0/DesignVolume.nii.gz",
+    "archive_sha256": "358946a3b91ccc50a91229cad53bcb353a63239ab6f03d11c060519285d49b23"
+  },
+  {
+    "path": "out/mtop/case1_96x48x48_TO_V0.12_r1.732_ft2_fmdistance_n50_mp0_se1/xPhys_sorted.dat",
+    "sha256": "b57169fe40ccbd81c9b3e5f99274715a5bf194739019310a18871ecf73fb48f5",
+    "archive": "out/mtop/case1_96x48x48_TO_V0.12_r1.732_ft2_fmdistance_n50_mp0_se1/xPhys_sorted.dat.gz",
+    "archive_sha256": "740fae69e6256fb2638ccb238647583a90c25afdf12413140f9dfd2f4d39fbcd"
+  },
+  {
+    "path": "out/mtop/case1_96x48x48_TO_V0.12_r3.464_ft2_fmdistance_n200_mp0_se1/xPhys_sorted.dat",
+    "sha256": "aae6c79ce2e49a33f59de963bbc3e6c185c30d73ca5f97c5bf8429b44d90e035",
+    "archive": "out/mtop/case1_96x48x48_TO_V0.12_r3.464_ft2_fmdistance_n200_mp0_se1/xPhys_sorted.dat.gz",
+    "archive_sha256": "b1b9216b88bbbeaa67acf4a5eacafba14afc3b1f602f8e48f3036b91a5e65ac6"
+  },
+  {
+    "path": "out/mtop/case1_96x48x48_TO_V0.12_r6.928_ft2_fmdistance_n200_mp0_se1/xPhys_sorted.dat",
+    "sha256": "a287e262325839cfdede5946cb8063610d0dfd04e70e61534847645757e31a61",
+    "archive": "out/mtop/case1_96x48x48_TO_V0.12_r6.928_ft2_fmdistance_n200_mp0_se1/xPhys_sorted.dat.gz",
+    "archive_sha256": "a85f11f55c48a78df389b93b0e38dd03c967b5d0f9a347a8219b3624f3d20db5"
+  },
+  {
+    "path": "out/verification/femur_TO_V0.4_r1.732_ft2_fmpde_n200_mp0_se0_L3/DesignVolume.nii",
+    "sha256": "c8e3467f6026fb1a36f96760663eae0664adbaf438ce8459d0adbad5ac5b5096",
+    "archive": "out/verification/femur_TO_V0.4_r1.732_ft2_fmpde_n200_mp0_se0_L3/DesignVolume.nii.gz",
+    "archive_sha256": "ad45aaa152e9ea3760a33d539fc562dc5a86c6c19ee13b74198a62bee074e396"
+  },
+  {
+    "path": "out/verification/Molar_TO_V0.4_r1.732_ft2_fmpde_n200_mp0_se0_L3/DesignVolume.nii",
+    "sha256": "ebb1b99e88f32cb6e039f1c9789951d5d37c3d7af2d2216793b9b89459777453",
+    "archive": "out/verification/Molar_TO_V0.4_r1.732_ft2_fmpde_n200_mp0_se0_L3/DesignVolume.nii.gz",
+    "archive_sha256": "d234f0fb84e4f6fa6e1caecd1ee5df3291c328df2fc8354a8d12693f641712f5"
+  },
+  {
+    "path": "outcpu/cpu_case_384x192x192_TO_V0.12_r1.732_ft2_tol0.001_n50_L4/DesignVolume.nii",
+    "sha256": "ebac5f211d26fc5893d27d7ce9133f41b2f26e78314e2399353a09d3a35de794",
+    "archive": "outcpu/cpu_case_384x192x192_TO_V0.12_r1.732_ft2_tol0.001_n50_L4/DesignVolume.nii.gz",
+    "archive_sha256": "0aff1ea14046132e8e5bfacabf328a13757ebe698762661c25fa9554d9aab195"
+  },
+  {
+    "path": "outcpu/cpu_case_384x192x192_TO_V0.12_r1.732_ft2_tol0.001_n50_L4_t1/DesignVolume.nii",
+    "sha256": "ebac5f211d26fc5893d27d7ce9133f41b2f26e78314e2399353a09d3a35de794",
+    "archive": "outcpu/cpu_case_384x192x192_TO_V0.12_r1.732_ft2_tol0.001_n50_L4_t1/DesignVolume.nii.gz",
+    "archive_sha256": "0aff1ea14046132e8e5bfacabf328a13757ebe698762661c25fa9554d9aab195"
+  },
+  {
+    "path": "outcpu/cpu_case_384x192x192_TO_V0.12_r1.732_ft2_tol0.001_n50_L4_t2/DesignVolume.nii",
+    "sha256": "ebac5f211d26fc5893d27d7ce9133f41b2f26e78314e2399353a09d3a35de794",
+    "archive": "outcpu/cpu_case_384x192x192_TO_V0.12_r1.732_ft2_tol0.001_n50_L4_t2/DesignVolume.nii.gz",
+    "archive_sha256": "0aff1ea14046132e8e5bfacabf328a13757ebe698762661c25fa9554d9aab195"
+  },
+  {
+    "path": "outcpu/cpu_case_384x192x192_TO_V0.12_r1.732_ft2_tol0.001_n50_L4_t3/DesignVolume.nii",
+    "sha256": "ebac5f211d26fc5893d27d7ce9133f41b2f26e78314e2399353a09d3a35de794",
+    "archive": "outcpu/cpu_case_384x192x192_TO_V0.12_r1.732_ft2_tol0.001_n50_L4_t3/DesignVolume.nii.gz",
+    "archive_sha256": "0aff1ea14046132e8e5bfacabf328a13757ebe698762661c25fa9554d9aab195"
+  },
+  {
+    "path": "outcpu/cpu_case_384x192x192_TO_V0.12_r1.732_ft2_tol0.001_n50_L4_t4/DesignVolume.nii",
+    "sha256": "ebac5f211d26fc5893d27d7ce9133f41b2f26e78314e2399353a09d3a35de794",
+    "archive": "outcpu/cpu_case_384x192x192_TO_V0.12_r1.732_ft2_tol0.001_n50_L4_t4/DesignVolume.nii.gz",
+    "archive_sha256": "0aff1ea14046132e8e5bfacabf328a13757ebe698762661c25fa9554d9aab195"
+  },
+  {
+    "path": "outcpu/cpu_Femur_TO_V0.4_r1.732_ft2_tol0.001_n200_L3/DesignVolume.nii",
+    "sha256": "470ac6957506a2dbd156f99d1517dea50f72f5a5727368616dda0c2c9962033b",
+    "archive": "outcpu/cpu_Femur_TO_V0.4_r1.732_ft2_tol0.001_n200_L3/DesignVolume.nii.gz",
+    "archive_sha256": "e6ed36340605c95a4115607b9a4c040b252916658117b895f432789618ac10b0"
+  },
+  {
+    "path": "outcpu/cpu_Molar_TO_V0.4_r1.732_ft2_tol0.001_n200_L3/DesignVolume.nii",
+    "sha256": "8fb024ba84b6c2b809ed842844f58f0e6eb58df6ba3ca72831b08c2e3eb818bc",
+    "archive": "outcpu/cpu_Molar_TO_V0.4_r1.732_ft2_tol0.001_n200_L3/DesignVolume.nii.gz",
+    "archive_sha256": "19381ffaaf5e67fdfbeacff6c0103ba4fbfc89d1d4001f07751fa7b9fb878f92"
+  }
+]

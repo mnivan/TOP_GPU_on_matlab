@@ -1,0 +1,9 @@
+Final exported design: out\case1_96x48x48_PIO_V0.5_r1.732_rh6_n200\DesignVolume.nii
+Density treatment: continuous exported density
+Aggregate local-volume value : 0.999927062235
+Constraint residual (g-1)    : -7.29377645098e-05
+Positive violation           : 0
+Maximum local fraction       : 0.642508232581
+Maximum local excess over V0 : +0.142508232581
+Global volume fraction       : 0.395835357253
+PDE PCG relative residual    : 7.047e-12 (61 iterations)

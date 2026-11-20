@@ -12,7 +12,10 @@ CLAUDE.md
 
 # Output directories generated at runtime
 out/
+outcpu/
 topX3D_results/
+time_results_all_sizes.mat
+time_results_all_sizes.csv
 
 # OS files
 .DS_Store

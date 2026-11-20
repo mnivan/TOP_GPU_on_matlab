@@ -1,0 +1,20 @@
+
+Compute_Compliance(true(192,384,192), ...
+    fullfile(runDir,'xPhys_sorted.dat'), ...
+    'optCase',1,'mixed_Precision',0, ...
+    'maxIT',800,'showFigure',false);
+[警告: 将重新编译 GPU 库，因为您的设备比库更新。编译可能需要几分钟时间。<a href="matlab:helpview('parallel-computing','cuda_jitting')">了解详细信息</a>。] 
+[> 位置：<a href="matlab:matlab.lang.internal.introspective.errorDocCallback('Compute_Compliance', 'C:\Users\Sherman\Desktop\上传\reproduce\Compute_Compliance.m', 33)" style="font-weight:bold">Compute_Compliance</a> (<a href="matlab: opentoline('C:\Users\Sherman\Desktop\上传\reproduce\Compute_Compliance.m',33,0)">第 33 行</a>)] 
+Mesh Hierarchy...
+             #Resolutions         #Elements   #DOFs
+...Level 1:  384 x  192 x  192    14155776    43022595
+...Level 2:   96 x   48 x   48      221184      698691
+...Level 3:   48 x   24 x   24       27648       91875
+  [AssembleStencil] L2:2.222s L3:0.047s L1-diagK:0.132s Chol:5.312s
+[警告: Exceed the maximum iterate numbers] 
+[> 位置：<a href="matlab:matlab.lang.internal.introspective.errorDocCallback('Compute_Compliance>Solving_PCG', 'C:\Users\Sherman\Desktop\上传\reproduce\Compute_Compliance.m', 786)" style="font-weight:bold">Compute_Compliance>Solving_PCG</a> (<a href="matlab: opentoline('C:\Users\Sherman\Desktop\上传\reproduce\Compute_Compliance.m',786,0)">第 786 行</a>)
+位置: <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('Compute_Compliance', 'C:\Users\Sherman\Desktop\上传\reproduce\Compute_Compliance.m', 79)" style="font-weight:bold">Compute_Compliance</a> (<a href="matlab: opentoline('C:\Users\Sherman\Desktop\上传\reproduce\Compute_Compliance.m',79,0)">第 79 行</a>)] 
+Compliance:   2.22832527e+04
+Fine-mesh result saved: C:\Users\Sherman\Desktop\上传\out\case1_96x48x48_TO_V0.12_r1.732_ft2_fmdistance_n50_mp0_se1\FineMeshCompliance.csv
+
+diary off;

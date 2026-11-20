@@ -1,6 +1,11 @@
 % compile_all.m - compile all CUDA MEX kernels
 cd(fileparts(mfilename('fullpath')));
-flags = 'NVCCFLAGS="--allow-unsupported-compiler -arch=sm_89"';
+arch = getenv('TOP_GPU_CUDA_ARCH');
+if isempty(arch), arch = 'sm_89'; end
+assert(~isempty(regexp(arch, '^sm_[0-9]+$', 'once')), ...
+    'TOP_GPU_CUDA_ARCH must have the form sm_89 or sm_120.');
+flags = sprintf('NVCCFLAGS="--allow-unsupported-compiler -arch=%s"', arch);
+fprintf('CUDA architecture target: %s\n', arch);
 
 files = {
     'assembleKs_level2_inplace',        'assembleKs_level2_inplace.cu';

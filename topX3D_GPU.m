@@ -12,6 +12,7 @@ addParameter(parser,'changeTol',0.01,@(v)isnumeric(v) && isscalar(v) && v>0);
 addParameter(parser,'pcgTol',1e-12,@(v)isnumeric(v) && isscalar(v) && v>0);
 addParameter(parser,'pcgMaxIter',800,@(v)isnumeric(v) && isscalar(v) && v>=1);
 addParameter(parser,'verbose',true,@(v)islogical(v) && isscalar(v));
+addParameter(parser,'uniformValidation',false,@(v)islogical(v) && isscalar(v));
 parse(parser,varargin{:});
 opt = parser.Results;
 
@@ -33,10 +34,19 @@ deviceName = gpu.Name;
 mexState = 'CUDA MEX (Gathering_inplace/Scattering_inplace)';
 resultRoot = fullfile(fileparts(mfilename('fullpath')),'topX3D_results');
 if ~exist(resultRoot,'dir'), mkdir(resultRoot); end
-runStamp = char(datetime('now','Format','yyyyMMdd_HHmmss_SSS'));
-caseName = sprintf('topX3D_%dx%dx%d_v%.4g_p%.4g_r%.4g_ft%d_%s', ...
-    nelx,nely,nelz,volfrac,penal,rmin,ft,runStamp);
+if opt.uniformValidation
+    caseName = sprintf('uniform_validation_%dx%dx%d',nelx,nely,nelz);
+else
+    caseName = sprintf('topX3D_%dx%dx%d_v%.4g_p%.4g_r%.4g_ft%d', ...
+        nelx,nely,nelz,volfrac,penal,rmin,ft);
+end
 outputDirectory = fullfile(resultRoot,caseName);
+baseDirectory = outputDirectory;
+repeatIndex = 1;
+while exist(outputDirectory,'dir')
+    outputDirectory = sprintf('%s_t%d',baseDirectory,repeatIndex);
+    repeatIndex = repeatIndex + 1;
+end
 mkdir(outputDirectory);
 logPath = fullfile(outputDirectory,'RunRecord.txt');
 stlPath = fullfile(outputDirectory,'Design.stl');
@@ -128,6 +138,9 @@ x = repmat(volfrac,nely,nelx,nelz);
 radius = sqrt((elementX-nelx/2-0.5).^2 + ...
     (elementY-nely/2-0.5).^2 + (elementZ-nelz/2-0.5).^2);
 x(radius<min([nelx,nely,nelz])/3) = volfrac/2;
+if opt.uniformValidation
+    x(:) = 1;
+end
 x = toDevice(x);
 xPhys = x;
 Ufluctuation = zeros(numPeriodicDofs,6,'like',x);
@@ -147,6 +160,8 @@ end
 change = 1;
 loop = 0;
 Q = zeros(6,6);
+equilibriumResidual = nan(1,6);
+fluctuationNorm = nan(1,6);
 while change > opt.changeTol && loop < opt.maxDesignIter
     loop = loop+1;
     iterationClock = tic;
@@ -167,6 +182,11 @@ while change > opt.changeTol && loop < opt.maxDesignIter
         pcgClock = tic;
         [Ufluctuation(:,loadCase),pcgIts,pcgRelRes] = matrixFreePCG3D( ...
             applyK,rhs,diagonalK,opt.pcgTol,opt.pcgMaxIter,Ufluctuation(:,loadCase));
+        if opt.uniformValidation
+            equilibriumResidual(loadCase) = scalarGather3D( ...
+                norm(applyK(Ufluctuation(:,loadCase))-rhs)/max(scalarGather3D(norm(rhs)),1));
+            fluctuationNorm(loadCase) = scalarGather3D(norm(Ufluctuation(:,loadCase)));
+        end
         wait(gpu);
         pcgTimes(loadCase) = toc(pcgClock);
         fluctuationNodes = reshape(Ufluctuation(:,loadCase),3,numPeriodicNodes).';
@@ -184,6 +204,40 @@ while change > opt.changeTol && loop < opt.maxDesignIter
             Q(i,j) = scalarGather3D(sum(elementModulus.*qe));
             dQ{i,j} = penal*(E0-Emin)*xPhys.^(penal-1).*reshape(qe,nely,nelx,nelz);
         end
+    end
+
+    if opt.uniformValidation
+        lambda = E0*nu/((1+nu)*(1-2*nu));
+        mu = E0/(2*(1+nu));
+        Cref = zeros(6,6);
+        Cref(1:3,1:3) = lambda;
+        Cref(1:3,1:3) = Cref(1:3,1:3)+2*mu*eye(3);
+        Cref(4:6,4:6) = mu*eye(3);
+        Qerror = Q-Cref;
+        Kcomputed = sum(Q(1:3,1:3),'all')/9;
+        Kreference = E0/(3*(1-2*nu));
+        fprintf(logFid,'\nUniform material validation (E=%.16g, nu=%.16g)\n',E0,nu);
+        fprintf(logFid,'Load order: xx yy zz xy yz xz; engineering shear strains\n');
+        fprintf(logFid,'Computed Q:\n');
+        fprintf(logFid,' %.16e %.16e %.16e %.16e %.16e %.16e\n',Q.');
+        fprintf(logFid,'Analytical C:\n');
+        fprintf(logFid,' %.16e %.16e %.16e %.16e %.16e %.16e\n',Cref.');
+        fprintf(logFid,'Q minus C:\n');
+        fprintf(logFid,' %.16e %.16e %.16e %.16e %.16e %.16e\n',Qerror.');
+        fprintf(logFid,'Maximum absolute tensor error: %.16e\n',max(abs(Qerror),[],'all'));
+        fprintf(logFid,'Computed bulk modulus: %.16e\n',Kcomputed);
+        fprintf(logFid,'Analytical bulk modulus: %.16e\n',Kreference);
+        fprintf(logFid,'Bulk modulus absolute error: %.16e\n',abs(Kcomputed-Kreference));
+        fprintf(logFid,'Equilibrium residual norm(Ku-f)/max(norm(f),1), six cases:\n');
+        fprintf(logFid,' %.16e',equilibriumResidual); fprintf(logFid,'\n');
+        fprintf(logFid,'Fluctuation displacement norms, six cases:\n');
+        fprintf(logFid,' %.16e',fluctuationNorm); fprintf(logFid,'\n');
+        fprintf(logFid,'PCG reported relative residuals, six cases:\n');
+        fprintf(logFid,' %.16e',history.pcgRelativeResidual(loop,:)); fprintf(logFid,'\n');
+        fprintf(logFid,'Completed: %s\n',char(datetime('now')));
+        clear fileCleanup;
+        fprintf('Uniform validation record: %s\n',logPath);
+        return;
     end
 
     objective = -sum(Q(1:3,1:3),'all');
@@ -269,7 +323,7 @@ fprintf(logFid,'Iterations: %d\nConverged: %d\nTotal time: %.6f s\n', ...
     loop,change<=opt.changeTol,totalTime);
 fprintf(logFid,'Final effective Q (xx yy zz xy yz xz):\n');
 fprintf(logFid,' %.16e %.16e %.16e %.16e %.16e %.16e\n',Q.');
-fprintf(logFid,'STL: %s\nTriangles: %d\n',stlPath,size(stlFaces,1));
+fprintf(logFid,'STL: Design.stl\nTriangles: %d\n',size(stlFaces,1));
 fprintf(logFid,'NIfTI: %s\nVoxel array: [%d %d %d]\n', ...
     niiPath,size(xPhysFinal,1),size(xPhysFinal,2),size(xPhysFinal,3));
 clear fileCleanup;

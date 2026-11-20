@@ -1,0 +1,34 @@
+End-to-end GPU topology optimization memory benchmark
+Selected metric    : Host (independent MATLAB run)
+Mesh X sizes       : 384
+MG levels          : 4
+ft / V0 / tol      : 2 / 0.12 / 1e-3
+Iterations         : 5
+Sampling interval  : 20 ms
+Result directory   : C:\Users\Sherman\Desktop\上传\out\memory_host_n5_L4
+
+[384x192x192]
+MATLAB PID         : 126584
+
+MeshResolution HostWorkingSetGiB GPUMemoryGiB MatlabExitCode
+-------------- ----------------- ------------ --------------
+384x192x192                 3.68          NaN              0
+
+Summary: C:\Users\Sherman\Desktop\上传\out\memory_host_n5_L4\summary.csv
+End-to-end GPU topology optimization memory benchmark
+Selected metric    : GPU (independent MATLAB run)
+Mesh X sizes       : 384
+MG levels          : 4
+ft / V0 / tol      : 2 / 0.12 / 1e-3
+Iterations         : 5
+Sampling interval  : 20 ms
+Result directory   : C:\Users\Sherman\Desktop\上传\out\memory_gpu_n5_L4
+
+[384x192x192]
+MATLAB PID         : 130352
+
+MeshResolution HostWorkingSetGiB GPUMemoryGiB MatlabExitCode
+-------------- ----------------- ------------ --------------
+384x192x192                  NaN        13.99              0
+
+Summary: C:\Users\Sherman\Desktop\上传\out\memory_gpu_n5_L4\summary.csv

@@ -11,6 +11,9 @@ function TOP_GPU(inputModel, varargin)
 %
 % PIO does not accept ft, filter_method, mixed_Precision, or super_element.
 % Super-element TO is restricted to ft=2 with the distance filter.
+% 'numLevels' specifies the final multigrid level count (default: automatic).
+% 'Num_' sets the super-element subdivision per axis (default: 4).
+% 'validationOnly' runs small-grid operator, solve, and sensitivity checks.
 
 [consType, solverArgs] = extractConstraintType(varargin);
 switch consType
@@ -57,6 +60,10 @@ addParameter(p, 'ft',               1, @(v) isnumeric(v) && isscalar(v) && ismem
 addParameter(p, 'filter_method',    'pde', @(v) ischar(v) || (isstring(v) && isscalar(v)));
 addParameter(p, 'mixed_Precision',  0);
 addParameter(p, 'super_element',    0);
+addParameter(p, 'Num_',             4, @(v) isnumeric(v) && isreal(v) && isscalar(v) && isfinite(v) && v == fix(v) && v >= 2);
+addParameter(p, 'validationOnly',   false, @(v) islogical(v) && isscalar(v));
+addParameter(p, 'numLevels',        [], @(v) isempty(v) || ...
+	(isnumeric(v) && isreal(v) && isscalar(v) && isfinite(v) && v == fix(v) && v >= 3));
 addParameter(p, 'tol',           1e-3, @(v) isnumeric(v) && isreal(v) && isscalar(v) && isfinite(v) && v > 0);
 parse(p, inputModel, varargin{:});
 
@@ -67,6 +74,9 @@ ft              = p.Results.ft;
 filter_method   = lower(char(p.Results.filter_method));
 mixed_Precision = p.Results.mixed_Precision;
 super_element   = p.Results.super_element;
+superElementSize = p.Results.Num_;
+validationOnly  = p.Results.validationOnly;
+requestedNumLevels = p.Results.numLevels;
 optCase_in      = p.Results.optCase;
 solverTol       = p.Results.tol;
 
@@ -78,12 +88,22 @@ if super_element ~= 0 && (ft ~= 2 || ~strcmp(filter_method, 'distance'))
 	error('TOP_GPU:SuperElementFilter', ...
 		'Super-element TO requires ft=2 and filter_method=''distance''.');
 end
+if validationOnly && (~islogical(inputModel) || ft ~= 2 || mixed_Precision ~= 0 || ...
+        (super_element == 0 && ~strcmp(filter_method,'pde')) || ...
+        (super_element ~= 0 && ~strcmp(filter_method,'distance')))
+    error('TOP_GPU:ValidationConfiguration', ...
+        'Validation requires a logical domain, ft=2, double precision, and the matching PDE or distance filter.');
+end
 
 reset(gpuDevice);
 global mixed_Precision_; mixed_Precision_ = mixed_Precision;
 global Super_element_;   Super_element_   = super_element;
 global optCase;          optCase          = optCase_in;
 global coarsestResolutionControl_; coarsestResolutionControl_ = 20000; 
+global requestedNumLevels_; requestedNumLevels_ = requestedNumLevels;
+global validationOnly_ validationCoarsestK_;
+validationOnly_ = validationOnly;
+validationCoarsestK_ = [];
 	global meshHierarchy_;
 	global specifyPassiveRegions_;
 	global passiveElements_;
@@ -102,12 +122,20 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 		[nely_sz, nelx_sz, nelz_sz] = size(inputModel);
 		folderName = sprintf('case%d_%dx%dx%d_TO_V%.4g_r%.4g_ft%d_fm%s_n%d_mp%d_se%d', ...
 			optCase_in, nelx_sz, nely_sz, nelz_sz, V0, rMin, ft, filter_method, nLoop, mixed_Precision, super_element);
+		InitialSettings(nelx_sz, superElementSize);
 	else
 		[~, modelName, ~] = fileparts(inputModel);
 		folderName = sprintf('%s_TO_V%.4g_r%.4g_ft%d_fm%s_n%d_mp%d_se%d', ...
 			modelName, V0, rMin, ft, filter_method, nLoop, mixed_Precision, super_element);
+		InitialSettings(1, superElementSize);
 	end
-	InitialSettings(); tol_ = solverTol;
+	if superElementSize ~= 4, folderName = [folderName sprintf('_Num%d', superElementSize)]; end
+	if ~isempty(requestedNumLevels), folderName = [folderName sprintf('_L%d', requestedNumLevels)]; end
+	if validationOnly
+		nonDyadic_ = 0;
+		folderName = [folderName '_dyadic_validation'];
+	end
+	tol_ = solverTol;
 	outPath = createUniqueOutputPath(folderName);
 	fid = fopen(strcat(outPath, 'RunLog.log'), 'w'); fclose(fid); diary(strcat(outPath, 'RunLog.log'));
 	
@@ -122,6 +150,11 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 	disp(['...............................................#MGCG Iterations: ', sprintf('%4i', maxIT_)]);
 	disp(strcat('.....................................................V-cycle: ', " ", typeVcycle_));
 	disp(['...............................................Non-dyadic Strategy: ', sprintf('%1i', nonDyadic_)]);
+	if isempty(requestedNumLevels)
+		disp('..........................................Multigrid Levels: Automatic');
+	else
+		disp(['..........................................Multigrid Levels: ', sprintf('%i', requestedNumLevels)]);
+	end
 	disp(['...........................................Youngs Modulus: ', sprintf('%6.4e', modulus_)]);
 	disp(['....................................Youngs Modulus (Min.): ', sprintf('%6.4e', modulusMin_)]);
 	disp(['...........................................Poissons Ratio: ', sprintf('%6.4e', poissonRatio_)]);	
@@ -159,7 +192,6 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 			clear filterMask;
 		end
     else
-		rMin=Num_*rMin;
 		[map_old2new, map_new2old] = gen_index_mapping(nelx, nely, nelz, Num_);
         bcF=0;
         [dy,dx,dz]=meshgrid(-ceil(rMin)+1:ceil(rMin)-1,...
@@ -197,6 +229,11 @@ global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
 	tSolvingFEAssemblingClock = tic;
 	Solving_AssembleFEAstencil();
 	itSolvingFEAssembling = toc(tSolvingFEAssemblingClock);
+	if validationOnly
+		TOP_GPU_ValidateSmallInternal(outPath, rMin, super_element);
+		diary off;
+		return;
+	end
 	d_F_=gpuArray(F_);
     tSolvingFEAiterationClock = tic;
 	for ii=1:size(F_,2), [U(:,ii), ~] = Solving_PCG(@Solving_KbyU_MatrixFree, @Solving_Vcycle, d_F_(:,ii), tol_, maxIT_, [0 1]);end	
@@ -432,18 +469,22 @@ addParameter(p, 'V0',      0.5);
 addParameter(p, 'rMin',    sqrt(3));
 addParameter(p, 'rHat',    6, @(v) isnumeric(v) && isreal(v) && isscalar(v) && isfinite(v) && v > 0);
 addParameter(p, 'nLoop',   300);
+addParameter(p, 'numLevels', [], @(v) isempty(v) || ...
+	(isnumeric(v) && isreal(v) && isscalar(v) && isfinite(v) && v == fix(v) && v >= 3));
 addParameter(p, 'tol',  1e-3, @(v) isnumeric(v) && isreal(v) && isscalar(v) && isfinite(v) && v > 0);
 parse(p, inputModel, varargin{:});
 
 Ve0 = p.Results.V0; rMin = p.Results.rMin; rHat = p.Results.rHat;
 nLoop = p.Results.nLoop; optCase_in = p.Results.optCase;
 solverTol = p.Results.tol;
+requestedNumLevels = p.Results.numLevels;
 
 reset(gpuDevice);
 global mixed_Precision_; mixed_Precision_ = 0;
 global Super_element_;   Super_element_ = 0;
 global optCase;          optCase = optCase_in;
 global coarsestResolutionControl_; coarsestResolutionControl_ = 20000;
+global requestedNumLevels_; requestedNumLevels_ = requestedNumLevels;
 global meshHierarchy_ specifyPassiveRegions_ passiveElements_;
 global modulus_ modulusMin_ SIMPpenalty_ tol_ maxIT_;
 global densityLayout_ F_ d_F_;
@@ -453,12 +494,14 @@ if islogical(inputModel)
 	[nely_sz, nelx_sz, nelz_sz] = size(inputModel);
 	folderName = sprintf('case%d_%dx%dx%d_PIO_V%.4g_r%.4g_rh%.4g_n%d', ...
 		optCase_in, nelx_sz, nely_sz, nelz_sz, Ve0, rMin, rHat, nLoop);
+	InitialSettings(nelx_sz, 4);
 else
 	[~, modelName, ~] = fileparts(inputModel);
 	folderName = sprintf('%s_PIO_V%.4g_r%.4g_rh%.4g_n%d', ...
 		modelName, Ve0, rMin, rHat, nLoop);
+	InitialSettings(1, 4);
 end
-InitialSettings();
+if ~isempty(requestedNumLevels), folderName = [folderName sprintf('_L%d', requestedNumLevels)]; end
 tol_ = solverTol;
 outPath = createUniqueOutputPath(folderName);
 fid = fopen(strcat(outPath, 'RunLog.log'), 'w'); fclose(fid); diary(strcat(outPath, 'RunLog.log'));
@@ -474,6 +517,11 @@ disp(['................................................Cell Size: ', sprintf('%6
 disp(['...............................................#MGCG Iterations: ', sprintf('%4i', maxIT_)]);
 disp(strcat('.....................................................V-cycle: ', " ", typeVcycle_));
 disp(['...............................................Non-dyadic Strategy: ', sprintf('%1i', nonDyadic_)]);
+if isempty(requestedNumLevels)
+	disp('..........................................Multigrid Levels: Automatic');
+else
+	disp(['..........................................Multigrid Levels: ', sprintf('%i', requestedNumLevels)]);
+end
 disp(['...........................................Youngs Modulus: ', sprintf('%6.4e', modulus_)]);
 disp(['....................................Youngs Modulus (Min.): ', sprintf('%6.4e', modulusMin_)]);
 disp(['...........................................Poissons Ratio: ', sprintf('%6.4e', poissonRatio_)]);
@@ -643,16 +691,29 @@ diary off;
 end
 
 function outPath = createUniqueOutputPath(folderName)
-outPath = ['./out/' folderName '/'];
-if exist(outPath, 'dir')
-	tIdx = 1;
-	while exist(['./out/' folderName '_t' num2str(tIdx) '/'], 'dir')
-		tIdx = tIdx + 1;
-	end
-	folderName = [folderName '_t' num2str(tIdx)];
-	outPath = ['./out/' folderName '/'];
+if contains(folderName, '_dyadic_validation')
+    category = 'validation';
+elseif contains(folderName, '_PIO_')
+    category = 'pio';
+elseif contains(folderName, '_fmdistance_') || startsWith(folderName, 'case2_')
+    category = 'mtop';
+elseif contains(folderName, '_n5_')
+    category = 'memory';
+elseif contains(folderName, '_n50_')
+    category = 'benchmark';
+else
+    category = 'verification';
+end
+basePath = fullfile('.', 'out', category);
+if ~exist(basePath, 'dir'), mkdir(basePath); end
+outPath = fullfile(basePath, folderName);
+tIdx = 1;
+while exist(outPath, 'dir')
+    outPath = fullfile(basePath, [folderName '_t' num2str(tIdx)]);
+    tIdx = tIdx + 1;
 end
 mkdir(outPath);
+outPath = [outPath filesep];
 end
 
 function writeOptimizationHistory(outPath, lssIts, cHist, sharpHist, tHist)
@@ -682,14 +743,470 @@ IO_ExportDesignInTriSurface_stl(strcat(outPath,'DesignVolume.stl'),faces,caps);
 end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         
-function InitialSettings()
+function TOP_GPU_ValidateSmallInternal(outPath,rMin,superMode)
+	global meshHierarchy_ mapUniqueKes_ uniqueKesFree_ uniqueKesFixed_;
+	global I_mat Ks0 modulus_ modulusMin_ SIMPpenalty_ F_ Num_ numLevels_;
+	global validationCoarsestK_;
+	global Super_element_;
+	m = meshHierarchy_(1);
+	ne = m.numElements;
+	assert(numLevels_>=2,'Validation requires at least one coarse level.');
+	if superMode==0, nvar=ne; else, nvar=Num_^3*ne; end
+	x = 0.42 + 0.06*sin((1:nvar)'*sqrt(2));
+	direction = cos((1:nvar)'*sqrt(3));
+	direction = direction/norm(direction);
+	filtered = TOP_GPU_ValidationFilter(x,rMin,superMode);
+	dFiltered = TOP_GPU_ValidationFilter(direction,rMin,superMode);
+	moduli = modulusMin_+(modulus_-modulusMin_)*filtered.^SIMPpenalty_;
+	if superMode==0
+		meshHierarchy_(1).eleModulus = moduli(:)';
+		meshHierarchy_(1).d_eleModulus = gpuArray(moduli(:));
+	else
+		meshHierarchy_(1).eleModulus = reshape(moduli,Num_^3,ne);
+		meshHierarchy_(1).d_eleModulus = gpuArray(meshHierarchy_(1).eleModulus);
+	end
+	Solving_AssembleFEAstencil();
+	K = TOP_GPU_ValidationExplicitK(1,moduli);
+	[fineLabels,fineErrors] = TOP_GPU_ValidationFineOperator(K);
+	coarseError = zeros(1,numLevels_-1);
+	coarseAbsoluteError = zeros(1,numLevels_-1);
+	coarseMaxEntryError = zeros(1,numLevels_-1);
+	coarsestAssemblyError = NaN;
+	coarsestGalerkinMatrixError = NaN;
+	localAssemblyError = zeros(1,numLevels_-1);
+	geometricPError = zeros(1,numLevels_-1);
+	globalGalerkinError = zeros(1,numLevels_-1);
+	localPError = zeros(1,numLevels_-1);
+	assemblyPConflict = zeros(1,numLevels_-1);
+	assemblyPGalerkinError = zeros(1,numLevels_-1);
+	for level=2:numLevels_
+		[localAssemblyError(level-1),G] = TOP_GPU_ValidationLocalGalerkinError(level,moduli);
+		nc = meshHierarchy_(level).numDOFs;
+		Pgeo = TOP_GPU_ValidationGeometricP(level);
+		Pactual = zeros(size(Pgeo));
+		for j=1:nc
+			e = zeros(nc,1); e(j)=1;
+			Pactual(:,j)=gather(Solving_InterpolationDeviation(gpuArray(e),level));
+		end
+		geometricPError(level-1)=norm(Pactual-Pgeo,'fro')/norm(Pgeo,'fro');
+		if level==2, Kprevious=K; else, Kprevious=TOP_GPU_ValidationExplicitK(level-1,[]); end
+		Gglobal=Pgeo'*Kprevious*Pgeo;
+		globalGalerkinError(level-1)=norm(G-Gglobal,'fro')/norm(G,'fro');
+		localPError(level-1)=TOP_GPU_ValidationLocalPError(level,Pgeo);
+		[Passembly,assemblyPConflict(level-1)]=TOP_GPU_ValidationAssemblyP(level);
+		assemblyPGalerkinError(level-1)=norm(G-Passembly'*Kprevious*Passembly,'fro')/norm(G,'fro');
+		if level==numLevels_
+			Kactual = validationCoarsestK_;
+			Kindependent = TOP_GPU_ValidationExplicitK(level,[]);
+			coarsestAssemblyError = norm(Kactual-Kindependent,'fro')/norm(Kindependent,'fro');
+			coarsestGalerkinMatrixError = norm(Kactual-G,'fro')/norm(G,'fro');
+		end
+		probeCoarse = [sin((1:nc)'*sqrt(11+level)), ...
+			cos((1:nc)'*sqrt(17+level))];
+		errorForProbes = zeros(1,size(probeCoarse,2));
+		absoluteForProbes = zeros(1,size(probeCoarse,2));
+		maxEntryForProbes = zeros(1,size(probeCoarse,2));
+		for j=1:size(probeCoarse,2)
+			v = probeCoarse(:,j);
+			actual = gather(Solving_KbyU_MatrixFree(gpuArray(v),level));
+			reference = G*v;
+			difference = actual-reference;
+			errorForProbes(j) = norm(difference)/max(norm(reference),eps);
+			absoluteForProbes(j) = norm(difference);
+			maxEntryForProbes(j) = max(abs(difference));
+		end
+		coarseError(level-1) = max(errorForProbes);
+		coarseAbsoluteError(level-1) = max(absoluteForProbes);
+		coarseMaxEntryError(level-1) = max(maxEntryForProbes);
+	end
+	f = full(double(F_(:,1)));
+	uDirect = K\f;
+	[uMF,~] = Solving_PCG(@Solving_KbyU_MatrixFree,@Solving_Vcycle, ...
+		gpuArray(f),1e-10,2000,[0 0]);
+	uMF = gather(uMF);
+	displacementError = norm(uMF-uDirect)/norm(uDirect);
+	trueResidual = norm(K*uMF-f)/norm(f);
+	operatorResidual = norm(gather(Solving_KbyU_MatrixFree(gpuArray(uMF)))-f)/norm(f);
+	compliance = f'*uDirect;
+	if superMode==0
+		unitEnergy = gather(TopOpti_ComputeUnitCompliance(uDirect));
+	else
+		unitEnergy = gather(pre_compute_der(uDirect));
+	end
+	physicalGradient = -SIMPpenalty_*(modulus_-modulusMin_)*filtered.^(SIMPpenalty_-1).*unitEnergy;
+	dc = TOP_GPU_ValidationFilter(physicalGradient,rMin,superMode,true);
+	dv = TOP_GPU_ValidationFilter(ones(size(filtered)),rMin,superMode,true);
+	analyticC = dc(:)'*direction;
+	analyticV = dv(:)'*direction/nvar;
+	fdSteps = [1e-4 3e-5 1e-5 3e-6 1e-6];
+	fdResults = zeros(numel(fdSteps),7);
+	for stepIndex=1:numel(fdSteps)
+		h = fdSteps(stepIndex);
+		rhoPlus = TOP_GPU_ValidationFilter(x+h*direction,rMin,superMode);
+		rhoMinus = TOP_GPU_ValidationFilter(x-h*direction,rMin,superMode);
+		Cplus = TOP_GPU_ValidationCompliance(rhoPlus,f);
+		Cminus = TOP_GPU_ValidationCompliance(rhoMinus,f);
+		fdC = (Cplus-Cminus)/(2*h);
+		fdV = (mean(rhoPlus(:))-mean(rhoMinus(:)))/(2*h);
+		fdResults(stepIndex,:) = [h fdC fdV abs(analyticC-fdC) ...
+			abs(analyticC-fdC)/max(abs(fdC),1e-12) abs(analyticV-fdV) ...
+			abs(analyticV-fdV)/max(abs(fdV),1e-12)];
+	end
+	fid = fopen(fullfile(outPath,'ValidationReport.txt'),'w');
+	assert(fid>=0,'Could not create validation report.');
+	cleaner = onCleanup(@() fclose(fid));
+	fprintf(fid,'TOP_GPU small-grid validation; mesh %d x %d x %d; super_element=%d\n', ...
+		m.resX,m.resY,m.resZ,superMode);
+	fprintf(fid,'Path: actual GPU matrix-free operator and explicit CPU sparse assembly\n');
+	fprintf(fid,'Fine-level action comparison: two unit-norm probes per support, full output compared; constrained input DOFs retained.\n');
+	fprintf(fid,'support max_relative_2norm_error max_absolute_2norm_error max_absolute_entry_error\n');
+	for group=1:numel(fineLabels)
+		fprintf(fid,'%s %.16e %.16e %.16e\n',fineLabels{group},fineErrors(group,:));
+	end
+	fprintf(fid,'Matrix-free versus independently assembled element-local Galerkin action errors (maximum of two probes), levels 2..%d: ',numLevels_);
+	fprintf(fid,'%.16e ',coarseError); fprintf(fid,'\n');
+	fprintf(fid,'Absolute Galerkin action difference 2-norm (maximum of two probes), levels 2..%d: ',numLevels_);
+	fprintf(fid,'%.16e ',coarseAbsoluteError); fprintf(fid,'\n');
+	fprintf(fid,'Maximum absolute Galerkin action entry (two probes), levels 2..%d: ',numLevels_);
+	fprintf(fid,'%.16e ',coarseMaxEntryError); fprintf(fid,'\n');
+	fprintf(fid,'Actual coarsest solve matrix versus independent same-level assembly, relative Frobenius error: %.16e\n',coarsestAssemblyError);
+	fprintf(fid,'Actual coarsest solve matrix versus element-local Galerkin reference, relative Frobenius error: %.16e\n',coarsestGalerkinMatrixError);
+	fprintf(fid,'Element-local Galerkin assembly errors, levels 2..%d: ',numLevels_);
+	fprintf(fid,'%.16e ',localAssemblyError); fprintf(fid,'\n');
+	fprintf(fid,'Runtime prolongation versus coordinate-built P errors, levels 2..%d: ',numLevels_);
+	fprintf(fid,'%.16e ',geometricPError); fprintf(fid,'\n');
+	fprintf(fid,'Element-local Galerkin versus coordinate P-transpose K P errors, levels 2..%d: ',numLevels_);
+	fprintf(fid,'%.16e ',globalGalerkinError); fprintf(fid,'\n');
+	fprintf(fid,'Local assembly interpolation versus global P errors, levels 2..%d: ',numLevels_);
+	fprintf(fid,'%.16e ',localPError); fprintf(fid,'\n');
+	fprintf(fid,'P built from original local ordering: maximum shared-row coefficient conflict: ');
+	fprintf(fid,'%.16e ',assemblyPConflict); fprintf(fid,'\n');
+	fprintf(fid,'Original local ordering averaged P: relative Galerkin errors (invalid as exact P if conflict is nonzero): ');
+	fprintf(fid,'%.16e ',assemblyPGalerkinError); fprintf(fid,'\n');
+	fprintf(fid,'Direct-solve compliance: %.16e\n',compliance);
+	fprintf(fid,'Matrix-free vs direct displacement relative error: %.16e\n',displacementError);
+	fprintf(fid,'True assembled equilibrium residual norm(Ku-f)/norm(f): %.16e\n',trueResidual);
+	fprintf(fid,'Matrix-free equilibrium residual: %.16e\n',operatorResidual);
+	fprintf(fid,'Filtered compliance directional derivative analytic/FD: %.16e / %.16e\n',analyticC,fdC);
+	fprintf(fid,'Filtered compliance derivative relative error: %.16e\n',abs(analyticC-fdC)/max(abs(fdC),1e-12));
+	fprintf(fid,'Filtered volume directional derivative analytic/FD: %.16e / %.16e\n',analyticV,fdV);
+	fprintf(fid,'Filtered volume derivative relative error: %.16e\n',abs(analyticV-fdV)/max(abs(fdV),1e-12));
+	fprintf(fid,'Finite difference step: %.16e\n',h);
+	fprintf(fid,'Central finite difference step sweep (unit 2-norm direction)\n');
+	fprintf(fid,'h compliance_FD volume_FD compliance_abs_error compliance_rel_error volume_abs_error volume_rel_error\n');
+	fprintf(fid,'%.16e %.16e %.16e %.16e %.16e %.16e %.16e\n',fdResults');
+	TOP_GPU_ValidationSensitivityProbes(fid,x,dc,dv,f,rMin,superMode,fdSteps);
+	clear cleaner;
+	fprintf('Validation report: %s\n',fullfile(outPath,'ValidationReport.txt'));
+end
+
+function [labels,errors] = TOP_GPU_ValidationFineOperator(K)
+	global meshHierarchy_ mapUniqueKes_;
+	m = meshHierarchy_(1);
+	interiorElements = true(m.numElements,1);
+	interiorElements(m.elementsOnBoundary) = false;
+	constrainedElements = find(mapUniqueKes_>0);
+	assert(any(interiorElements) && ~isempty(constrainedElements), ...
+		'Fine validation needs interior and constrained elements.');
+	labels = {'all_nodes','interior_element_nodes','constrained_element_nodes'};
+	nodeGroups = {(1:m.numNodes)',unique(m.eNodMat(interiorElements,:)), ...
+		unique(m.eNodMat(constrainedElements,:))};
+	probes = [sin((1:m.numDOFs)'*sqrt(7)),cos((1:m.numDOFs)'*sqrt(13))];
+	errors = zeros(numel(labels),3);
+	for group=1:numel(labels)
+		nodes = double(nodeGroups{group}(:));
+		dofs = reshape([3*nodes-2,3*nodes-1,3*nodes].',[],1);
+		for probe=1:size(probes,2)
+			v = zeros(m.numDOFs,1);
+			v(dofs) = probes(dofs,probe);
+			v = v/norm(v);
+			actual = gather(Solving_KbyU_MatrixFree(gpuArray(v),1));
+			reference = K*v;
+			difference = actual-reference;
+			errors(group,:) = max(errors(group,:), ...
+				[norm(difference)/norm(reference),norm(difference),max(abs(difference))]);
+		end
+	end
+end
+
+function [P,conflict] = TOP_GPU_ValidationAssemblyP(level)
+% Reconstruct interpolation from the original assembly ordering, without
+% permuting children. Shared fine DOFs must prescribe identical global rows.
+% Averaging below is diagnostic only when those rows disagree.
+	global meshHierarchy_;
+	fine=meshHierarchy_(level-1); coarse=meshHierarchy_(level);
+	Bfull=full(Solving_Operator4MultiGridRestrictionAndInterpolation('inDOF',coarse.spanWidth));
+	nodes=Solving_SubEleNodMat(coarse.spanWidth);
+	dofs=[3*nodes-2 3*nodes-1 3*nodes];
+	dofs=dofs(:,[1 9 17 2 10 18 3 11 19 4 12 20 5 13 21 6 14 22 7 15 23 8 16 24]);
+	P=sparse(fine.numDOFs,coarse.numDOFs);
+	firstRows=P; seen=false(fine.numDOFs,1); counts=zeros(fine.numDOFs,1);
+	conflict=0;
+	for e=1:coarse.numElements
+		n=double(coarse.eNodMat(e,:));
+		cd=reshape([3*n-2;3*n-1;3*n],[],1);
+		for s=1:size(nodes,1)
+			child=double(coarse.elementUpwardMap(e,s));
+			if child==0, continue; end
+			n=double(fine.eNodMat(child,:));
+			fd=reshape([3*n-2;3*n-1;3*n],[],1);
+			rows=sparse(24,coarse.numDOFs);
+			rows(:,cd)=Bfull(dofs(s,:),:);
+			old=seen(fd);
+			if any(old)
+				conflict=max(conflict,full(max(max(abs(firstRows(fd(old),:)-rows(old,:))))));
+			end
+			firstRows(fd(~old),:)=rows(~old,:); seen(fd)=true;
+			P(fd,:)=P(fd,:)+rows; counts(fd)=counts(fd)+1;
+		end
+	end
+	P=spdiags(1./max(counts,1),0,fine.numDOFs,fine.numDOFs)*P;
+end
+
+function worst = TOP_GPU_ValidationLocalPError(level,P)
+	global meshHierarchy_;
+	span=meshHierarchy_(level).spanWidth;
+	Bfull=full(Solving_Operator4MultiGridRestrictionAndInterpolation('inDOF',span));
+	subNodes=Solving_SubEleNodMat(span);
+	reorder=[1 9 17 2 10 18 3 11 19 4 12 20 5 13 21 6 14 22 7 15 23 8 16 24];
+	subDofs=[3*subNodes-2 3*subNodes-1 3*subNodes];
+	subDofs=subDofs(:,reorder);
+	worst=0;
+	for e=1:meshHierarchy_(level).numElements
+		parentNodes=double(meshHierarchy_(level).eNodMat(e,:));
+		parentDofs=reshape([3*parentNodes-2;3*parentNodes-1;3*parentNodes],[],1);
+		for s=1:size(subDofs,1)
+			child=double(meshHierarchy_(level).elementUpwardMap(e,s));
+			if child==0, continue; end
+			childNodes=double(meshHierarchy_(level-1).eNodMat(child,:));
+			childDofs=reshape([3*childNodes-2;3*childNodes-1;3*childNodes],[],1);
+			worst=max(worst,norm(full(P(childDofs,parentDofs))-Bfull(subDofs(s,:),:),'fro'));
+		end
+	end
+end
+
+function P = TOP_GPU_ValidationGeometricP(level)
+	global meshHierarchy_;
+	fine=meshHierarchy_(level-1);
+	coarse=meshHierarchy_(level);
+	span=coarse.spanWidth;
+	base=meshHierarchy_(1);
+	[fy,fx,fz]=ind2sub([base.resY+1,base.resX+1,base.resZ+1],double(fine.nodMapBack(:)));
+	fineScale=base.resX/fine.resX;
+	xyz=[fx-1,fy-1,fz-1]/fineScale;
+	P=sparse(fine.numDOFs,coarse.numDOFs);
+	for a=1:fine.numNodes
+		cellXYZ=min(floor(xyz(a,:)/span),[coarse.resX-1,coarse.resY-1,coarse.resZ-1]);
+		cellIndex=sub2ind([coarse.resY,coarse.resX,coarse.resZ], ...
+			cellXYZ(2)+1,cellXYZ(1)+1,cellXYZ(3)+1);
+		cNodes=double(coarse.eNodMat(cellIndex,:));
+		for b=1:8
+			globalNode=double(coarse.nodMapBack(cNodes(b)));
+			[cy,cx,cz]=ind2sub([base.resY+1,base.resX+1,base.resZ+1],globalNode);
+			coarseXYZ=[cx-1,cy-1,cz-1]/fineScale;
+			weight=prod(1-abs(xyz(a,:)-coarseXYZ)/span);
+			for d=1:3
+				P(3*a-3+d,3*cNodes(b)-3+d)=weight;
+			end
+		end
+	end
+end
+
+function [worst,G] = TOP_GPU_ValidationLocalGalerkinError(level,moduli)
+	global meshHierarchy_ mapUniqueKes_ uniqueKesFree_ uniqueKesFixed_ I_mat Num_;
+	span = meshHierarchy_(level).spanWidth;
+	Bfull = full(Solving_Operator4MultiGridRestrictionAndInterpolation('inDOF',span));
+	subNodes = Solving_SubEleNodMat(span);
+	reorder = [1 9 17 2 10 18 3 11 19 4 12 20 5 13 21 6 14 22 7 15 23 8 16 24];
+	subDofs = [3*subNodes-2 3*subNodes-1 3*subNodes];
+	subDofs = subDofs(:,reorder);
+	worst = 0;
+	G = sparse(meshHierarchy_(level).numDOFs,meshHierarchy_(level).numDOFs);
+	for e=1:meshHierarchy_(level).numElements
+		Kexpected = zeros(24);
+		for s=1:size(subDofs,1)
+			child = double(meshHierarchy_(level).elementUpwardMap(e,s));
+			if child==0, continue; end
+			if level>2
+				Kchild = gather(meshHierarchy_(level-1).d_Ks(:,:,child));
+			elseif isvector(moduli)
+				idx = double(mapUniqueKes_(child));
+				if idx==0
+					Kchild = meshHierarchy_(1).Ke*moduli(child);
+				else
+					Kchild = reshape(uniqueKesFree_(:,idx),24,24)*moduli(child) + ...
+						reshape(uniqueKesFixed_(:,idx),24,24);
+				end
+			else
+				idx = double(mapUniqueKes_(child));
+				if idx==0
+					Kchild = reshape(I_mat*moduli(:,child),24,24);
+				else
+					Kchild = reshape(uniqueKesFree_(:,:,idx)*moduli(:,child),24,24) + ...
+						reshape(uniqueKesFixed_(:,idx),24,24);
+				end
+			end
+			B = Bfull(subDofs(s,:),:);
+			Kexpected = Kexpected + B'*Kchild*B;
+		end
+		Kactual = gather(meshHierarchy_(level).d_Ks(:,:,e));
+		worst = max(worst,norm(Kactual-Kexpected,'fro')/max(norm(Kexpected,'fro'),eps));
+		nodes = double(meshHierarchy_(level).eNodMat(e,:));
+		dofs = reshape([3*nodes-2;3*nodes-1;3*nodes],[],1);
+		G(dofs,dofs) = G(dofs,dofs)+Kexpected;
+	end
+end
+
+function K = TOP_GPU_ValidationExplicitK(level,moduli)
+	global meshHierarchy_ mapUniqueKes_ uniqueKesFree_ uniqueKesFixed_;
+	global I_mat Num_ modulus_;
+	m = meshHierarchy_(level);
+	ne = m.numElements;
+	K = sparse(m.numDOFs,m.numDOFs);
+	if level==1
+		if isvector(moduli), moduli=reshape(moduli,1,ne); else, moduli=reshape(moduli,Num_^3,ne); end
+	end
+	chunkSize=2000;
+	for first=1:chunkSize:ne
+		last=min(first+chunkSize-1,ne);
+		count=last-first+1;
+		dofsBlock=zeros(24,count);
+		valuesBlock=zeros(576,count);
+		for e=first:last
+		if level>1
+			Ke = gather(m.d_Ks(:,:,e));
+		elseif size(moduli,1)==1
+			idx = double(mapUniqueKes_(e));
+			if idx==0
+				Ke = m.Ke*moduli(e);
+			else
+				Ke = reshape(uniqueKesFree_(:,idx),24,24)*moduli(e) + ...
+					reshape(uniqueKesFixed_(:,idx),24,24);
+			end
+		else
+			idx = double(mapUniqueKes_(e));
+			if idx==0
+				Ke = reshape(I_mat*moduli(:,e),24,24);
+			else
+				Ke = reshape(uniqueKesFree_(:,:,idx)*moduli(:,e),24,24) + ...
+					reshape(uniqueKesFixed_(:,idx),24,24);
+			end
+		end
+			nodes=double(m.eNodMat(e,:));
+			dofsBlock(:,e-first+1)=reshape([3*nodes-2;3*nodes-1;3*nodes],[],1);
+			valuesBlock(:,e-first+1)=Ke(:);
+		end
+		rows=repmat(dofsBlock,24,1);
+		cols=repelem(dofsBlock,24,1);
+		K=K+sparse(rows(:),cols(:),valuesBlock(:),m.numDOFs,m.numDOFs);
+	end
+end
+
+function rho = TOP_GPU_ValidationFilter(x,rMin,superMode,reverse)
+	global meshHierarchy_ Num_;
+	m=meshHierarchy_(1);
+	if superMode==0
+		[kernel,diagonal]=TopOpti_SetupPDEfilter_matrixFree(rMin,true(m.resY,m.resX,m.resZ));
+		rho=gather(TopOpti_ConductPDEFiltering_matrixFree(gpuArray(x(:)), ...
+			gpuArray(kernel),gpuArray(diagonal)));
+	else
+		[old2new,new2old]=gen_index_mapping(m.resX,m.resY,m.resZ,Num_);
+		span=-(ceil(rMin)-1):(ceil(rMin)-1);
+		[dy,dx,dz]=meshgrid(span,span,span);
+		h=gpuArray(max(0,rMin-sqrt(dx.^2+dy.^2+dz.^2)));
+		shape=[Num_*m.resY,Num_*m.resX,Num_*m.resZ];
+		Hs=imfilter(gpuArray(ones(shape)),h,0);
+		v=gpuArray(x(:));
+		if nargin>3 && reverse
+			rho=gather(TOP_GPU_DistanceSensitivity(reshape(v,Num_^3,m.numElements),Hs,h,0,old2new,new2old,shape));
+		else
+			r=imfilter(reshape(v(old2new),shape),h,0)./Hs;
+			rho=reshape(gather(r(new2old)),Num_^3,m.numElements);
+		end
+	end
+end
+
+function gradient = TOP_GPU_DistanceSensitivity(gradient,Hs,kernel,boundary,old2new,new2old,gridSize)
+	gradientSize = size(gradient);
+	gradient = gradient(:);
+	gradient = imfilter(reshape(gradient(old2new),gridSize)./Hs,kernel,boundary);
+	gradient = reshape(gradient(new2old),gradientSize);
+end
+
+function TOP_GPU_ValidationSensitivityProbes(fid,x,dc,dv,f,rMin,superMode,steps)
+	global meshHierarchy_ Num_;
+	m = meshHierarchy_(1);
+	scale = 1;
+	if superMode, scale = Num_; end
+	gridSize = scale*[m.resY m.resX m.resZ];
+	locations = [ceil(gridSize/2); 1 ceil(gridSize(2)/2) ceil(gridSize(3)/2); ceil(gridSize(1)/2) 1 ceil(gridSize(3)/2)];
+	indices = sub2ind(gridSize,locations(:,1),locations(:,2),locations(:,3));
+	if superMode
+		[old2new,~] = gen_index_mapping(m.resX,m.resY,m.resZ,Num_);
+		indices = double(gather(old2new(indices)));
+	end
+	labels = {'positive_direction','interior_variable','boundary_variable','fixed_end_variable'};
+	nvar = numel(x);
+	fprintf(fid,'Sensitivity uses production energy routines and reverse filtering; compliance is unnormalized, volume is mean density.\n');
+	for probe=1:numel(labels)
+		if probe==1
+			direction = 1+0.5*cos((1:nvar)'*sqrt(3));
+			direction = direction/norm(direction);
+			variableIndex = 0;
+		else
+			variableIndex = indices(probe-1);
+			direction = zeros(nvar,1); direction(variableIndex)=1;
+		end
+		analyticC = dc(:)'*direction;
+		analyticV = dv(:)'*direction/nvar;
+		fprintf(fid,'Probe %s variable_index=%d analytic_C=%.16e analytic_V=%.16e\n',labels{probe},variableIndex,analyticC,analyticV);
+		fprintf(fid,'h compliance_FD volume_FD compliance_abs_error compliance_rel_error volume_abs_error volume_rel_error\n');
+		for step=steps
+			rhoPlus = TOP_GPU_ValidationFilter(x+step*direction,rMin,superMode);
+			rhoMinus = TOP_GPU_ValidationFilter(x-step*direction,rMin,superMode);
+			fdC = (TOP_GPU_ValidationCompliance(rhoPlus,f)-TOP_GPU_ValidationCompliance(rhoMinus,f))/(2*step);
+			fdV = (mean(rhoPlus(:))-mean(rhoMinus(:)))/(2*step);
+			fprintf(fid,'%.16e %.16e %.16e %.16e %.16e %.16e %.16e\n',step,fdC,fdV,abs(analyticC-fdC),abs(analyticC-fdC)/max(abs(fdC),1e-12),abs(analyticV-fdV),abs(analyticV-fdV)/max(abs(fdV),1e-12));
+		end
+	end
+end
+
+function dc = TOP_GPU_ValidationComplianceGradient(u,rho,superMode)
+	global meshHierarchy_ I_mat modulus_ modulusMin_ SIMPpenalty_ Num_;
+	m=meshHierarchy_(1); ne=m.numElements;
+	if superMode==0, dc=zeros(ne,1); else, dc=zeros(Num_^3,ne); end
+	for e=1:ne
+		nodes=double(m.eNodMat(e,:));
+		dofs=reshape([3*nodes-2;3*nodes-1;3*nodes],[],1);
+		ue=u(dofs);
+		if superMode==0
+			energy=ue'*m.Ke*ue;
+			dc(e)=-(modulus_-modulusMin_)*SIMPpenalty_*rho(e)^(SIMPpenalty_-1)*energy;
+		else
+			for s=1:Num_^3
+				energy=ue'*reshape(I_mat(:,s),24,24)*ue;
+				dc(s,e)=-(modulus_-modulusMin_)*SIMPpenalty_*rho(s,e)^(SIMPpenalty_-1)*energy;
+			end
+		end
+	end
+end
+
+function C = TOP_GPU_ValidationCompliance(rho,f)
+	global modulus_ modulusMin_ SIMPpenalty_;
+	moduli=modulusMin_+(modulus_-modulusMin_)*rho.^SIMPpenalty_;
+	K=TOP_GPU_ValidationExplicitK(1,moduli);
+	u=K\f;
+	C=f'*u;
+end
+
+function InitialSettings(nelx, superElementSize)
 	%% Physical Property
 	global modulus_; modulus_ = 1.0; %% Young's modulus	
 	global poissonRatio_; poissonRatio_ = 0.3;	%% Poisson's ratio
 	global modulusMin_; modulusMin_ = 1.0e-6 * modulus_;	
 	global SIMPpenalty_; SIMPpenalty_ = 3;
-	global cellSize_; cellSize_ = 1;
-	global Num_;Num_=4;%size of super element
+	global cellSize_; cellSize_ = 1/nelx;
+	global Num_; Num_ = superElementSize; % subdivisions per super-element axis
 	%% Linear System Solver	
 	global tol_; tol_ = 1.0e-3; %% convergence tolerance of iterative linear system solver
 	global maxIT_; maxIT_ = 800; %% permitted maximum number of Conjugate Gradient iteartion
@@ -1322,6 +1839,7 @@ end
 end
 
 function Solving_AssembleFEAstencil()
+	global validationOnly_ validationCoarsestK_;
 	global meshHierarchy_;
 	global numLevels_;
 	global cholFac_; global cholPermut_;
@@ -1521,6 +2039,7 @@ end
 	iK = eDofMat(:,rowIndice);
 	jK = eDofMat(:,colIndice);
 	KcoarsestLevel = sparse(iK, jK, sK');
+	if validationOnly_, validationCoarsestK_ = KcoarsestLevel; end
 	[cholFac_, ~, cholPermut_] = chol(KcoarsestLevel,'lower');
 	t_coarsest = toc(t_coarsest);
 	%% Print timing breakdown
@@ -1553,11 +2072,6 @@ function Solving_BuildingMeshHierarchy()
 	nodeVolume = 1:(int32(meshHierarchy_(1).resX)+1)*(int32(meshHierarchy_(1).resY)+1)*(int32(meshHierarchy_(1).resZ)+1);
 	nodeVolume = reshape(nodeVolume(:), meshHierarchy_(1).resY+1, meshHierarchy_(1).resX+1, meshHierarchy_(1).resZ+1);
 
-	if 1==nonDyadic_ && numLevels_>=4
-		numLevels_ = numLevels_ - 1; 
-	else
-		nonDyadic_ = 0;
-	end
 	for ii=2:numLevels_
 		%%1. adjust voxel resolution
 		if ii==2 && 1==nonDyadic_
@@ -2186,84 +2700,15 @@ function oEleList = Common_IncludeAdjacentElements(iEleList)
 end
 
 function val = Solving_SubEleNodMat(spanWidth)
-	switch spanWidth
-		case 2
-			val = [ 2 	5 	4 	1 	11 	14 	13 	10
-					3 	6 	5 	2 	12 	15 	14 	11
-					6 	9 	8 	5 	15 	18 	17 	14
-					5 	8 	7 	4 	14 	17 	16 	13
-					11 	14 	13 	10 	20 	23 	22 	19
-					12 	15 	14 	11 	21 	24 	23 	20
-					15 	18 	17 	14 	24 	27 	26 	23
-					14 	17 	16 	13 	23 	26 	25 	22];
-		case 4
-			val = [ 2	7	6	1	27	32	31	26
-					3	8	7	2	28	33	32	27
-					4	9	8	3	29	34	33	28
-					5	10	9	4	30	35	34	29
-					7	12	11	6	32	37	36	31
-					8	13	12	7	33	38	37	32
-					9	14	13	8	34	39	38	33
-					10	15	14	9	35	40	39	34
-					12	17	16	11	37	42	41	36
-					13	18	17	12	38	43	42	37
-					14	19	18	13	39	44	43	38
-					15	20	19	14	40	45	44	39
-					17	22	21	16	42	47	46	41
-					18	23	22	17	43	48	47	42
-					19	24	23	18	44	49	48	43
-					20	25	24	19	45	50	49	44
-					27	32	31	26	52	57	56	51		
-					28	33	32	27	53	58	57	52
-					29	34	33	28	54	59	58	53
-					30	35	34	29	55	60	59	54
-					32	37	36	31	57	62	61	56
-					33	38	37	32	58	63	62	57
-					34	39	38	33	59	64	63	58
-					35	40	39	34	60	65	64	59
-					37	42	41	36	62	67	66	61
-					38	43	42	37	63	68	67	62
-					39	44	43	38	64	69	68	63
-					40	45	44	39	65	70	69	64
-					42	47	46	41	67	72	71	66
-					43	48	47	42	68	73	72	67
-					44	49	48	43	69	74	73	68
-					45	50	49	44	70	75	74	69
-					52	57	56	51	77	82	81	76		
-					53	58	57	52	78	83	82	77
-					54	59	58	53	79	84	83	78
-					55	60	59	54	80	85	84	79
-					57	62	61	56	82	87	86	81
-					58	63	62	57	83	88	87	82
-					59	64	63	58	84	89	88	83
-					60	65	64	59	85	90	89	84
-					62	67	66	61	87	92	91	86
-					63	68	67	62	88	93	92	87
-					64	69	68	63	89	94	93	88
-					65	70	69	64	90	95	94	89
-					67	72	71	66	92	97	96	91
-					68	73	72	67	93	98	97	92
-					69	74	73	68	94	99	98	93
-					70	75	74	69	95	100	99	94
-					77	82	81	76	102	107	106	101
-					78	83	82	77	103	108	107	102
-					79	84	83	78	104	109	108	103
-					80	85	84	79	105	110	109	104
-					82	87	86	81	107	112	111	106
-					83	88	87	82	108	113	112	107
-					84	89	88	83	109	114	113	108
-					85	90	89	84	110	115	114	109
-					87	92	91	86	112	117	116	111
-					88	93	92	87	113	118	117	112
-					89	94	93	88	114	119	118	113
-					90	95	94	89	115	120	119	114
-					92	97	96	91	117	122	121	116
-					93	98	97	92	118	123	122	117
-					94	99	98	93	119	124	123	118
-					95	100	99	94	120	125	124	119];
-		otherwise
-			error('Wrong input of span width!')
+	if ~(2==spanWidth || 4==spanWidth)
+		error('Wrong Span Width!');
 	end
+	nx = spanWidth; ny = nx; nz = nx;
+	nodenrs = reshape(1:(nx+1)*(ny+1)*(nz+1), 1+ny, 1+nx, 1+nz);
+	eNodVec = reshape(nodenrs(1:end-1,1:end-1,1:end-1)+1, nx*ny*nz, 1);
+	val = repmat(eNodVec,1,8);
+	tmp = [0 ny+[1 0] -1 (ny+1)*(nx+1)+[0 ny+[1 0] -1]];
+	val = val + repmat(tmp, nx*ny*nz, 1);
 end
 
 function FEA_VoxelBasedDiscretization()	
@@ -2272,8 +2717,10 @@ function FEA_VoxelBasedDiscretization()
 	global voxelizedVolume_; 
 	global meshHierarchy_;
 	global coarsestResolutionControl_;
+	global requestedNumLevels_;
 	global eNodMatHalfTemp_;
 	global numLevels_;
+	global nonDyadic_;
 	%    z
 	%    |__ x
 	%   / 
@@ -2292,16 +2739,32 @@ function FEA_VoxelBasedDiscretization()
 	%%1. adjust voxel resolution for building Mesh Hierarchy
 	[nely_, nelx_, nelz_] = size(voxelizedVolume_);
     numVoxels = nnz(voxelizedVolume_);%%numVoxels = numel(find(voxelizedVolume_));	
-	numLevels_ = 0;
-	while numVoxels>=coarsestResolutionControl_
-		numLevels_ = numLevels_+1;
-		numVoxels = round(numVoxels/8);
+	if isempty(requestedNumLevels_)
+		% Preserve the original automatic 20,000-element coarsest-grid rule.
+		automaticCoarseningPower = 0;
+		while numVoxels>=coarsestResolutionControl_
+			automaticCoarseningPower = automaticCoarseningPower+1;
+			numVoxels = round(numVoxels/8);
+		end
+		automaticCoarseningPower = max(3,automaticCoarseningPower);
+		if nonDyadic_
+			numLevels_ = automaticCoarseningPower;
+		else
+			numLevels_ = automaticCoarseningPower + 1;
+		end
+		coarseningPower = automaticCoarseningPower;
+	else
+		% The requested value is the final number of levels used by the V-cycle.
+		numLevels_ = requestedNumLevels_;
+		if nonDyadic_
+			coarseningPower = requestedNumLevels_;
+		else
+			coarseningPower = requestedNumLevels_ - 1;
+		end
 	end
-	numLevels_ = max(3,numLevels_);
-	adjustedNelx = ceil(nelx_/2^numLevels_)*2^numLevels_;
-	adjustedNely = ceil(nely_/2^numLevels_)*2^numLevels_;
-	adjustedNelz = ceil(nelz_/2^numLevels_)*2^numLevels_;
-	numLevels_ = numLevels_ + 1;
+	adjustedNelx = ceil(nelx_/2^coarseningPower)*2^coarseningPower;
+	adjustedNely = ceil(nely_/2^coarseningPower)*2^coarseningPower;
+	adjustedNelz = ceil(nelz_/2^coarseningPower)*2^coarseningPower;
 	if adjustedNelx>nelx_
 		voxelizedVolume_(:,end+1:adjustedNelx,:) = false(nely_,adjustedNelx-nelx_,nelz_);
 	end

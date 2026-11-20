@@ -1,0 +1,184 @@
+[����: ���� vecnorm ��ĳ�� MATLAB ���ú���ͬ�����������������ú����Ա���Ǳ�ڵ����Ƴ�ͻ��] 
+Gathering MEX : C:\Users\Sherman\Desktop\�ϴ�\Gathering_inplace.mexw64
+Scattering MEX: C:\Users\Sherman\Desktop\�ϴ�\Scattering_inplace.mexw64
+
+============================================================
+Case 1/4: 48 x 24 x 24 elements
+============================================================
+[����: �����±��� GPU �⣬��Ϊ�����豸�ȿ���¡����������Ҫ������ʱ�䡣] 
+[> λ�ã�parallel.internal.gpu.selectDevice
+λ��: parallel.gpu.GPUDevice.current (�� 46 ��)
+λ��: gpuDevice (�� 23 ��)
+λ��: time>benchmark_case (�� 135 ��)
+λ��: time (�� 34 ��)
+λ��: run (�� 112 ��)] 
+Block-assembling explicit K from 15925248 total triplets (1 blocks, at most 27648 elements/block)...
+  assembled block 1/1
+
+--- Matrix-free K*u ---
+CPU gather: 0.002989 +/- 0.001088 s
+CPU matmul : 0.001724 +/- 0.000352 s
+CPU scatter : 0.001885 +/- 0.000469 s
+CPU total  : 0.006598 s
+GPU status : COMPLETED
+GPU gather: 0.000078 +/- 0.000093 s
+GPU matmul : 0.000348 +/- 0.000340 s
+GPU scatter : 0.000069 +/- 0.000056 s
+GPU total  : 0.000496 s; speedup 13.311x; error 6.719e-17
+CPU/GPU matrix-free memory: 0.012 / 0.012 GiB
+
+--- Explicit sparse matrix ---
+CPU status : COMPLETED
+GPU status : COMPLETED
+Estimated nnz: 6954345; CPU/GPU SpMV memory: 0.106 / 0.079 GiB; assembly/compress: 0.819 / 0.272 GiB
+Assembly blocks: 1, elements/block: 27648
+Assembly/compression: 0.483605 / 0.000000 s
+CPU SpMV: 0.003092 +/- 0.000264 s
+K nnz: 6954345; nzmax before/after: 6954345 / 6954345
+K storage before/after: 0.104 / 0.104 GiB
+CPU SpMV/assembly/compress memory: 0.106 / 0.717 / 0.117 GiB
+Upload: 0.326836 s; GPU SpMV: 0.000367 +/- 0.000324 s
+GPU SpMV memory: 0.087 GiB; CPU/GPU SpMV speedup: 8.415x
+[����: �����±��� GPU �⣬��Ϊ�����豸�ȿ���¡����������Ҫ������ʱ�䡣] 
+[> λ�ã�time>reset_gpu_safely (�� 481 ��)
+λ��: time>@()reset_gpu_safely(dev) (�� 136 ��)
+λ��: onCleanup/delete (�� 25 ��)
+λ��: time>benchmark_case (�� 366 ��)
+λ��: time (�� 34 ��)
+λ��: run (�� 112 ��)] 
+
+============================================================
+Case 2/4: 96 x 48 x 48 elements
+============================================================
+Block-assembling explicit K from 127401984 total triplets (3 blocks, at most 100000 elements/block)...
+  assembled block 1/3
+  assembled block 2/3
+  assembled block 3/3
+
+--- Matrix-free K*u ---
+CPU gather: 0.016152 +/- 0.000788 s
+CPU matmul : 0.010986 +/- 0.000682 s
+CPU scatter : 0.011845 +/- 0.000509 s
+CPU total  : 0.038983 s
+GPU status : COMPLETED
+GPU gather: 0.000158 +/- 0.000031 s
+GPU matmul : 0.001795 +/- 0.000567 s
+GPU scatter : 0.000195 +/- 0.000057 s
+GPU total  : 0.002149 s; speedup 18.141x; error 8.178e-17
+CPU/GPU matrix-free memory: 0.098 / 0.098 GiB
+
+--- Explicit sparse matrix ---
+CPU status : COMPLETED
+GPU status : COMPLETED
+Estimated nnz: 54686025; CPU/GPU SpMV memory: 0.831 / 0.624 GiB; assembly/compress: 3.902 / 2.140 GiB
+Assembly blocks: 3, elements/block: 100000
+Assembly/compression: 4.794851 / 0.558894 s
+CPU SpMV: 0.019963 +/- 0.001233 s
+K nnz: 54686025; nzmax before/after: 55067166 / 54686025
+K storage before/after: 0.826 / 0.820 GiB
+CPU SpMV/assembly/compress memory: 0.831 / 3.395 / 2.146 GiB
+Upload: 0.159142 s; GPU SpMV: 0.001851 +/- 0.000508 s
+GPU SpMV memory: 0.637 GiB; CPU/GPU SpMV speedup: 10.782x
+[����: �����±��� GPU �⣬��Ϊ�����豸�ȿ���¡����������Ҫ������ʱ�䡣] 
+[> λ�ã�time>reset_gpu_safely (�� 481 ��)
+λ��: time>@()reset_gpu_safely(dev) (�� 136 ��)
+λ��: onCleanup/delete (�� 25 ��)
+λ��: time>benchmark_case (�� 366 ��)
+λ��: time (�� 34 ��)
+λ��: run (�� 112 ��)] 
+
+============================================================
+Case 3/4: 192 x 96 x 96 elements
+============================================================
+Block-assembling explicit K from 1019215872 total triplets (18 blocks, at most 100000 elements/block)...
+  assembled block 1/18
+  assembled block 2/18
+  assembled block 3/18
+  assembled block 4/18
+  assembled block 5/18
+  assembled block 6/18
+  assembled block 7/18
+  assembled block 8/18
+  assembled block 9/18
+  assembled block 10/18
+  assembled block 11/18
+  assembled block 12/18
+  assembled block 13/18
+  assembled block 14/18
+  assembled block 15/18
+  assembled block 16/18
+  assembled block 17/18
+  assembled block 18/18
+
+--- Matrix-free K*u ---
+CPU gather: 0.118951 +/- 0.001409 s
+CPU matmul : 0.060572 +/- 0.000698 s
+CPU scatter : 0.079068 +/- 0.000960 s
+CPU total  : 0.258591 s
+GPU status : COMPLETED
+GPU gather: 0.001273 +/- 0.000052 s
+GPU matmul : 0.015000 +/- 0.002193 s
+GPU scatter : 0.001251 +/- 0.000029 s
+GPU total  : 0.017523 s; speedup 14.757x; error 1.191e-16
+CPU/GPU matrix-free memory: 0.780 / 0.780 GiB
+
+--- Explicit sparse matrix ---
+CPU status : COMPLETED
+GPU status : COMPLETED
+Estimated nnz: 433724553; CPU/GPU SpMV memory: 6.585 / 4.949 GiB; assembly/compress: 15.951 / 16.978 GiB
+Assembly blocks: 18, elements/block: 100000
+Assembly/compression: 42.144852 / 5.526108 s
+CPU SpMV: 0.152536 +/- 0.009082 s
+K nnz: 433724553; nzmax before/after: 435233214 / 433724553
+K storage before/after: 6.526 / 6.504 GiB
+CPU SpMV/assembly/compress memory: 6.585 / 15.170 / 17.000 GiB
+Upload: 12.143662 s; GPU SpMV: 0.013789 +/- 0.001191 s
+GPU SpMV memory: 4.958 GiB; CPU/GPU SpMV speedup: 11.062x
+[����: �����±��� GPU �⣬��Ϊ�����豸�ȿ���¡����������Ҫ������ʱ�䡣] 
+[> λ�ã�time>reset_gpu_safely (�� 481 ��)
+λ��: time>@()reset_gpu_safely(dev) (�� 136 ��)
+λ��: onCleanup/delete (�� 25 ��)
+λ��: time>benchmark_case (�� 366 ��)
+λ��: time (�� 34 ��)
+λ��: run (�� 112 ��)] 
+
+============================================================
+Case 4/4: 384 x 192 x 192 elements
+============================================================
+
+--- Matrix-free K*u ---
+CPU gather: 1.065426 +/- 0.065114 s
+CPU matmul : 0.512173 +/- 0.018611 s
+CPU scatter : 0.726450 +/- 0.048822 s
+CPU total  : 2.304048 s
+GPU status : COMPLETED
+GPU gather: 0.010177 +/- 0.000114 s
+GPU matmul : 0.117462 +/- 0.012920 s
+GPU scatter : 0.009366 +/- 0.000095 s
+GPU total  : 0.137004 s; speedup 16.817x; error 1.234e-16
+CPU/GPU matrix-free memory: 6.231 / 6.231 GiB
+
+--- Explicit sparse matrix ---
+CPU status : SKIPPED: safe estimate 162.30 GiB, available 11.74 GiB
+GPU status : SKIPPED: CPU K was not assembled
+Estimated nnz: 3454804233; CPU/GPU SpMV memory: 52.442 / 39.412 GiB; assembly/compress: 111.997 / 135.253 GiB
+Assembly blocks: 142, elements/block: 100000
+[����: �����±��� GPU �⣬��Ϊ�����豸�ȿ���¡����������Ҫ������ʱ�䡣] 
+[> λ�ã�time>reset_gpu_safely (�� 481 ��)
+λ��: time>@()reset_gpu_safely(dev) (�� 136 ��)
+λ��: onCleanup/delete (�� 25 ��)
+λ��: time>benchmark_case (�� 366 ��)
+λ��: time (�� 34 ��)
+λ��: run (�� 112 ��)] 
+
+==================== ALL RESULTS ====================
+    nx     ny     nz     numElements     numNodes     nRuns      status       gpuMatrixFreeStatus                       cpuExplicitStatus                                gpuExplicitStatus             matrixFreeError    cpuGatherMean    cpuGatherStd    cpuMatmulMean    cpuMatmulStd    cpuScatterMean    cpuScatterStd    cpuMatrixFreeTotal    gpuGatherMean    gpuGatherStd    gpuMatmulMean    gpuMatmulStd    gpuScatterMean    gpuScatterStd    gpuMatrixFreeTotal    matrixFreeSpeedup    cpuMatrixFreeGiB    gpuMatrixFreeGiB    numTriplets    explicitSafeEstimateGiB    estimatedNnzK    assemblyBlockSize    assemblyNumBlocks    cpuExplicitEstimateGiB    gpuExplicitEstimateGiB    cpuAssemblyEstimateGiB    cpuCompressionEstimateGiB    cpuAssemblyTime    cpuCompressionTime    gpuUploadTime    cpuSpmvMean    cpuSpmvStd    gpuSpmvMean    gpuSpmvStd    spmvSpeedup    cpuExplicitVsMatrixFree    gpuExplicitVsMatrixFree    explicitCpuError    explicitGpuError       nnzK       nzmaxBefore    nzmaxAfter    KStorageBeforeGiB    KStorageAfterGiB    cpuExplicitSpmvGiB    gpuExplicitSpmvGiB    cpuAssemblyPeakGiB    cpuCompressionPeakGiB
+    ___    ___    ___    ___________    __________    _____    ___________    ___________________    ________________________________________________________    __________________________________    _______________    _____________    ____________    _____________    ____________    ______________    _____________    __________________    _____________    ____________    _____________    ____________    ______________    _____________    __________________    _________________    ________________    ________________    ___________    _______________________    _____________    _________________    _________________    ______________________    ______________________    ______________________    _________________________    _______________    __________________    _____________    ___________    __________    ___________    __________    ___________    _______________________    _______________________    ________________    ________________    __________    ___________    __________    _________________    ________________    __________________    __________________    __________________    _____________________
+
+     48     24     24         27648          30625     10      "COMPLETED"        "COMPLETED"        "COMPLETED"                                                 "COMPLETED"                             6.7187e-17         0.0029889       0.0010883        0.0017242       0.00035243       0.0018853        0.00046944          0.0065985            7.82e-05       9.2797e-05      0.00034839       0.00034011        6.911e-05       5.6269e-05          0.0004957              13.311              0.012291            0.012291        1.5925e+07             0.98295             6.9543e+06            27648                   1                  0.10568                   0.079432                  0.81912                     0.27205                 0.4836                    0             0.32684        0.0030924     0.00026439    0.00036749     0.00032438       8.415               2.1337                     1.3489                2.7398e-16           2.653e-16       6.9543e+06    6.9543e+06     6.9543e+06         0.10431             0.10431              0.10568               0.08732                 0.717                 0.1166        
+     96     48     48    2.2118e+05      2.329e+05     10      "COMPLETED"        "COMPLETED"        "COMPLETED"                                                 "COMPLETED"                             8.1775e-17          0.016152       0.0007881         0.010986       0.00068203        0.011845        0.00050865           0.038983          0.00015833       3.0805e-05       0.0017952       0.00056721       0.00019532       5.6744e-05          0.0021489              18.141              0.097757            0.097757         1.274e+08              4.6819             5.4686e+07            1e+05                   3                   0.8305                    0.62418                   3.9016                      2.1402                 4.7949              0.55889             0.15914         0.019963      0.0012332     0.0018515     0.00050774      10.782               1.9528                     1.1606                2.7597e-16          2.6755e-16       5.4686e+07    5.5067e+07     5.4686e+07         0.82577             0.82009               0.8305               0.63716                3.3946                 2.1459        
+    192     96     96    1.7695e+06     1.8159e+06     10      "COMPLETED"        "COMPLETED"        "COMPLETED"                                                 "COMPLETED"                             1.1909e-16           0.11895       0.0014089         0.060572       0.00069782        0.079068         0.0009599            0.25859           0.0012728        5.246e-05           0.015        0.0021932        0.0012506       2.9061e-05           0.017523              14.757               0.77991             0.77991        1.0192e+09              20.374             4.3372e+08            1e+05                  18                   6.5848                     4.9487                   15.951                      16.978                 42.145               5.5261              12.144          0.15254      0.0090818      0.013789      0.0011907      11.062               1.6953                     1.2709                2.7454e-16          2.6673e-16       4.3372e+08    4.3523e+08     4.3372e+08          6.5261              6.5036               6.5848                4.9578                 15.17                     17        
+    384    192    192    1.4156e+07     1.4341e+07     10      "COMPLETED"        "COMPLETED"        "SKIPPED: safe estimate 162.30 GiB, available 11.74 GiB"    "SKIPPED: CPU K was not assembled"      1.2338e-16            1.0654        0.065114          0.51217         0.018611         0.72645          0.048822              2.304            0.010177       0.00011394         0.11746          0.01292        0.0093655       9.5192e-05              0.137              16.817                6.2309              6.2309        8.1537e+09               162.3             3.4548e+09            1e+05                 142                   52.442                     39.412                      112                      135.25                    NaN                  NaN                 NaN              NaN            NaN           NaN            NaN         NaN                  NaN                        NaN                       NaN                 NaN              NaN           NaN            NaN             NaN                 NaN                  NaN                   NaN                   NaN                    NaN        
+
+MAT results: C:\Users\Sherman\Desktop\�ϴ�\reproduce\time_results_all_sizes.mat
+CSV results: C:\Users\Sherman\Desktop\�ϴ�\reproduce\time_results_all_sizes.csv

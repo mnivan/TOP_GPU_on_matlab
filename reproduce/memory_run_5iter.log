@@ -1,0 +1,82 @@
+End-to-end GPU topology optimization memory benchmark
+Selected metric    : Host (independent MATLAB run)
+Mesh X sizes       : 48, 96, 192, 384
+MG levels          : 3
+ft / V0 / tol      : 2 / 0.12 / 1e-3
+Iterations         : 5
+Sampling interval  : 20 ms
+Result directory   : C:\Users\Sherman\Desktop\上传\out\memory_host_n5_L3
+
+[48x24x24]
+MATLAB PID         : 138992
+
+MeshResolution HostWorkingSetGiB GPUMemoryGiB MatlabExitCode
+-------------- ----------------- ------------ --------------
+48x24x24                    0.99          NaN              0
+
+
+[96x48x48]
+MATLAB PID         : 139608
+
+MeshResolution HostWorkingSetGiB GPUMemoryGiB MatlabExitCode
+-------------- ----------------- ------------ --------------
+96x48x48                    0.92          NaN              0
+
+
+[192x96x96]
+MATLAB PID         : 124352
+
+MeshResolution HostWorkingSetGiB GPUMemoryGiB MatlabExitCode
+-------------- ----------------- ------------ --------------
+192x96x96                   1.36          NaN              0
+
+
+[384x192x192]
+MATLAB PID         : 136968
+
+MeshResolution HostWorkingSetGiB GPUMemoryGiB MatlabExitCode
+-------------- ----------------- ------------ --------------
+384x192x192                 8.49          NaN              0
+
+Summary: C:\Users\Sherman\Desktop\上传\out\memory_host_n5_L3\summary.csv
+End-to-end GPU topology optimization memory benchmark
+Selected metric    : GPU (independent MATLAB run)
+Mesh X sizes       : 48, 96, 192, 384
+MG levels          : 3
+ft / V0 / tol      : 2 / 0.12 / 1e-3
+Iterations         : 5
+Sampling interval  : 20 ms
+Result directory   : C:\Users\Sherman\Desktop\上传\out\memory_gpu_n5_L3
+
+[48x24x24]
+MATLAB PID         : 128452
+
+MeshResolution HostWorkingSetGiB GPUMemoryGiB MatlabExitCode
+-------------- ----------------- ------------ --------------
+48x24x24                     NaN         0.24              0
+
+
+[96x48x48]
+MATLAB PID         : 136568
+
+MeshResolution HostWorkingSetGiB GPUMemoryGiB MatlabExitCode
+-------------- ----------------- ------------ --------------
+96x48x48                     NaN         0.67              0
+
+
+[192x96x96]
+MATLAB PID         : 138424
+
+MeshResolution HostWorkingSetGiB GPUMemoryGiB MatlabExitCode
+-------------- ----------------- ------------ --------------
+192x96x96                    NaN         2.83              0
+
+
+[384x192x192]
+MATLAB PID         : 124884
+
+MeshResolution HostWorkingSetGiB GPUMemoryGiB MatlabExitCode
+-------------- ----------------- ------------ --------------
+384x192x192                  NaN        14.01              0
+
+Summary: C:\Users\Sherman\Desktop\上传\out\memory_gpu_n5_L3\summary.csv
