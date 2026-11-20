@@ -1,7 +1,5 @@
 % Paper reproduction commands. Run one MATLAB section at a time.
 % Compile CUDA MEX files with compile_all.m before GPU runs.
-% After cloning, run "python reproduce/restore_large_results.py" in a shell
-% to restore result files stored as .gz due to GitHub's 100 MiB file limit.
 repoRoot = fileparts(fileparts(mfilename('fullpath')));
 cd(repoRoot);
 addpath(fullfile(repoRoot,'reproduce'));
